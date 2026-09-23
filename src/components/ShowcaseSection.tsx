@@ -68,7 +68,7 @@ export const ShowcaseSection: React.FC<ShowcaseSectionProps> = ({ onBackToPlayer
             </a>
 
             <a
-              href="https://github.com/robin-bin0sky/Ambient4K"
+              href="https://github.com/rrobin0sky/online-ai-ambient"
               target="_blank"
               rel="noopener noreferrer"
               className="w-full sm:w-auto px-6 py-4 rounded-2xl glass-panel hover:bg-white/10 text-slate-200 font-medium flex items-center justify-center gap-2.5 transition-all cursor-pointer text-base border border-white/15"

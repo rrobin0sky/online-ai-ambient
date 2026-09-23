@@ -79,7 +79,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
 
         {/* GitHub link */}
         <a
-          href="https://github.com/robin-bin0sky/Ambient4K"
+          href="https://github.com/rrobin0sky/online-ai-ambient"
           target="_blank"
           rel="noopener noreferrer"
           className="p-2 rounded-full text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
