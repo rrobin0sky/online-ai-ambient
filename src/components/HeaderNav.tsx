@@ -1,5 +1,6 @@
 import React from 'react';
-import { Sparkles, Download, Github, Monitor, Compass } from 'lucide-react';
+import { Download, Github, Monitor, Compass } from 'lucide-react';
+import { BrandLogo } from './BrandLogo';
 
 interface HeaderNavProps {
   activeTab: 'player' | 'showcase';
@@ -24,16 +25,12 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
         {/* Brand */}
         <button
           onClick={() => onTabChange('player')}
-          className="flex items-center gap-2.5 px-3 py-1.5 rounded-full hover:bg-white/5 transition-colors group cursor-pointer text-left"
+          className="flex items-center gap-2.5 px-2.5 py-1 rounded-full hover:bg-white/5 transition-colors group cursor-pointer text-left"
         >
-          <div className="w-7 h-7 rounded-xl bg-gradient-to-tr from-indigo-500 via-purple-500 to-pink-500 p-[1.5px] shadow-lg group-hover:scale-105 transition-transform">
-            <div className="w-full h-full bg-black/90 rounded-[10px] flex items-center justify-center">
-              <Sparkles className="w-3.5 h-3.5 text-indigo-300" />
-            </div>
-          </div>
+          <BrandLogo size={30} className="group-hover:scale-105 transition-transform drop-shadow-lg" />
           <div className="hidden sm:block">
             <span className="font-bold text-sm tracking-tight text-white flex items-center gap-1.5">
-              Ambient<span className="text-indigo-400 font-extrabold text-xs px-1.5 py-0.5 rounded bg-indigo-500/20 border border-indigo-500/30">4K</span>
+              Ambient<span className="text-indigo-300 font-extrabold text-[11px] px-1.5 py-0.5 rounded-md bg-indigo-500/20 border border-indigo-400/30">4K</span>
             </span>
           </div>
         </button>

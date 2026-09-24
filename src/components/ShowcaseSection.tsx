@@ -11,6 +11,7 @@ import {
   CheckCircle2,
   ExternalLink
 } from 'lucide-react';
+import { BrandLogo } from './BrandLogo';
 
 interface ShowcaseSectionProps {
   onBackToPlayer: () => void;
@@ -36,13 +37,10 @@ export const ShowcaseSection: React.FC<ShowcaseSectionProps> = ({ onBackToPlayer
         {/* HERO SECTION */}
         <div className="text-center max-w-3xl mx-auto mb-20">
           {/* App Icon badge */}
-          <div className="inline-block relative mb-6">
-            <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-[24px] bg-gradient-to-br from-indigo-500/30 to-purple-500/20 p-1 shadow-2xl glow-indigo mx-auto backdrop-blur-xl border border-white/20">
-              <img
-                src="/AppIcon.svg"
-                alt="Ambient4K Icon"
-                className="w-full h-full object-contain rounded-[22px] drop-shadow-md"
-              />
+          <div className="inline-block relative mb-7 group">
+            <div className="absolute -inset-2 rounded-[32px] bg-gradient-to-r from-cyan-500/30 via-indigo-500/30 to-purple-500/30 blur-xl opacity-75 group-hover:opacity-100 transition duration-500" />
+            <div className="relative w-28 h-28 sm:w-32 sm:h-32 rounded-[28px] bg-black/40 p-1.5 shadow-2xl glow-indigo mx-auto backdrop-blur-xl border border-white/20 flex items-center justify-center">
+              <BrandLogo size={112} className="drop-shadow-2xl group-hover:scale-[1.03] transition-transform duration-300" />
             </div>
           </div>
 
