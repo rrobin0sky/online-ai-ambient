@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { CURATED_WALLPAPERS } from './data/wallpapers';
 import { HeaderNav } from './components/HeaderNav';
 import { ClockWidget } from './components/ClockWidget';
@@ -7,9 +7,9 @@ import { ShowcaseSection } from './components/ShowcaseSection';
 import { CategorySettingsModal } from './components/CategorySettingsModal';
 import { WallpaperStage, ScaleMode } from './components/WallpaperStage';
 import { soundManager } from './services/soundSynthesizer';
-import { SoundType, PlayerFilterConfig, WallpaperItem } from './types';
+import { SoundType, PlayerFilterConfig, WallpaperItem, QualityMode } from './types';
 
-const STORAGE_KEY = 'ambient4k_web_filter_v1';
+const STORAGE_KEY = 'ambient4k_web_filter_v2';
 
 const DEFAULT_FILTER_CONFIG: PlayerFilterConfig = {
   category: 'all',
@@ -19,6 +19,7 @@ const DEFAULT_FILTER_CONFIG: PlayerFilterConfig = {
   passcodeOrKey: '',
   enableYande: true,
   enableKonachan: true,
+  qualityMode: 'auto',
 };
 
 function loadSavedConfig(): PlayerFilterConfig {
@@ -31,10 +32,47 @@ function loadSavedConfig(): PlayerFilterConfig {
   }
 }
 
+function getOptimalStreamWidth(mode: QualityMode = 'auto'): number {
+  if (mode === 'raw') return 0; // 0 = uncompressed original
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const physicalW = Math.round(window.innerWidth * dpr);
+
+  if (mode === 'fast') {
+    return physicalW <= 1080 ? 1080 : 1920;
+  }
+
+  // Auto adaptive mode
+  if (physicalW <= 1170) return 1280;
+  if (physicalW <= 2560) return 2560;
+  return 3840;
+}
+
+function adaptCuratedPool(items: WallpaperItem[], targetWidth: number): WallpaperItem[] {
+  return items.map((item) => {
+    const originalUrl = item.rawUrl || item.url;
+    if (targetWidth <= 0 || !originalUrl.includes('images.unsplash.com')) {
+      return { ...item, rawUrl: originalUrl };
+    }
+    const adaptedUrl = originalUrl
+      .replace(/w=\d+/, `w=${targetWidth}`)
+      .replace(/q=\d+/, 'q=82');
+    return {
+      ...item,
+      url: adaptedUrl,
+      rawUrl: originalUrl,
+    };
+  });
+}
+
 export function App() {
   const [activeTab, setActiveTab] = useState<'player' | 'showcase'>('player');
   const [filterConfig, setFilterConfig] = useState<PlayerFilterConfig>(loadSavedConfig);
-  const [wallpaperPool, setWallpaperPool] = useState<WallpaperItem[]>(CURATED_WALLPAPERS);
+  const [detectedWidth, setDetectedWidth] = useState<number>(() =>
+    getOptimalStreamWidth(loadSavedConfig().qualityMode)
+  );
+  const [wallpaperPool, setWallpaperPool] = useState<WallpaperItem[]>(() =>
+    adaptCuratedPool(CURATED_WALLPAPERS, getOptimalStreamWidth(loadSavedConfig().qualityMode))
+  );
   const [currentIndex, setCurrentIndex] = useState(0);
   const [autoPlay, setAutoPlay] = useState(true);
   const [scaleMode, setScaleMode] = useState<ScaleMode>('auto');
@@ -51,22 +89,37 @@ export function App() {
   const isRefillingRef = useRef<boolean>(false);
 
   const currentWallpaper = wallpaperPool[currentIndex] || CURATED_WALLPAPERS[0];
-  const nextWallpaper =
-    wallpaperPool.length > 1
-      ? wallpaperPool[(currentIndex + 1) % wallpaperPool.length]
-      : undefined;
 
-  // Fetch remote 4K wallpapers via Cloudflare Worker API
+  // Build sliding-window preload list (next 3 items in queue)
+  const preloadWallpapers = useMemo(() => {
+    if (wallpaperPool.length <= 1) return [];
+    const list: WallpaperItem[] = [];
+    const count = Math.min(3, wallpaperPool.length - 1);
+    for (let i = 1; i <= count; i++) {
+      list.push(wallpaperPool[(currentIndex + i) % wallpaperPool.length]);
+    }
+    return list;
+  }, [wallpaperPool, currentIndex]);
+
+  // Fetch remote wallpapers via Cloudflare Worker API with screen-adaptive width
   const fetchCloudWallpapers = useCallback(
     async (cfg: PlayerFilterConfig, appendMode: boolean = false) => {
       if (!appendMode) {
         setIsFetchingPool(true);
       }
 
-      const localFiltered =
+      const streamW = getOptimalStreamWidth(cfg.qualityMode || 'auto');
+      setDetectedWidth(streamW || 3840);
+
+      const rawLocalFiltered =
         cfg.category === 'all' || cfg.category === 'custom'
           ? CURATED_WALLPAPERS
           : CURATED_WALLPAPERS.filter((w) => w.category === cfg.category);
+
+      const localFiltered = adaptCuratedPool(
+        rawLocalFiltered.length > 0 ? rawLocalFiltered : CURATED_WALLPAPERS,
+        streamW
+      );
 
       try {
         const params = new URLSearchParams({
@@ -77,6 +130,7 @@ export function App() {
           key: cfg.passcodeOrKey.trim(),
           yande: cfg.enableYande ? '1' : '0',
           konachan: cfg.enableKonachan ? '1' : '0',
+          w: String(streamW),
         });
 
         const res = await fetch(`/api/wallpapers?${params.toString()}`);
@@ -95,10 +149,7 @@ export function App() {
               const combined =
                 cfg.adultMode && cfg.purityMode === '001'
                   ? json.data
-                  : [
-                      ...json.data,
-                      ...(localFiltered.length > 0 ? localFiltered : CURATED_WALLPAPERS),
-                    ];
+                  : [...json.data, ...localFiltered];
               setWallpaperPool(combined);
               setCurrentIndex(0);
             }
@@ -108,11 +159,11 @@ export function App() {
           }
         }
       } catch {
-        // Fallback to curated local pool if offline
+        // Fallback to adapted local pool if offline
       }
 
       if (!appendMode) {
-        setWallpaperPool(localFiltered.length > 0 ? localFiltered : CURATED_WALLPAPERS);
+        setWallpaperPool(localFiltered);
         setCurrentIndex(0);
       }
       setIsFetchingPool(false);
@@ -170,18 +221,21 @@ export function App() {
   }, [wallpaperPool.length]);
 
   // Broken image handler: remove failed item from pool and advance immediately
-  const handleImageError = useCallback((failedId: string) => {
-    setWallpaperPool((prev) => {
-      if (prev.length <= 1) return CURATED_WALLPAPERS;
-      const filtered = prev.filter((item) => item.id !== failedId);
-      return filtered.length > 0 ? filtered : CURATED_WALLPAPERS;
-    });
-    setCurrentIndex((prev) => prev % Math.max(1, wallpaperPool.length - 1));
-  }, [wallpaperPool.length]);
+  const handleImageError = useCallback(
+    (failedId: string) => {
+      setWallpaperPool((prev) => {
+        if (prev.length <= 1) return adaptCuratedPool(CURATED_WALLPAPERS, detectedWidth);
+        const filtered = prev.filter((item) => item.id !== failedId);
+        return filtered.length > 0 ? filtered : adaptCuratedPool(CURATED_WALLPAPERS, detectedWidth);
+      });
+      setCurrentIndex((prev) => prev % Math.max(1, wallpaperPool.length - 1));
+    },
+    [wallpaperPool.length, detectedWidth]
+  );
 
-  // Smart Auto-Play Timer: Only starts counting 22s AFTER the current image has rendered!
+  // Smart Auto-Play Timer: Only starts counting 22s AFTER the current image has rendered
   useEffect(() => {
-    if (autoPlayTimerRef.current) clearInterval(autoPlayTimerRef.current);
+    if (autoPlayTimerRef.current) clearTimeout(autoPlayTimerRef.current);
 
     if (!autoPlay || activeTab !== 'player' || isCategoryModalOpen || !isCurrentImageLoaded) {
       return;
@@ -228,11 +282,11 @@ export function App() {
     });
   }, []);
 
-  // Save current 4K wallpaper image
+  // Save current wallpaper (Always downloads 100% uncompressed rawUrl!)
   const handleSaveCurrentImage = useCallback(() => {
     if (!currentWallpaper) return;
     const link = document.createElement('a');
-    link.href = currentWallpaper.url;
+    link.href = currentWallpaper.rawUrl || currentWallpaper.url;
     link.target = '_blank';
     link.download = `Ambient4K_${currentWallpaper.id}.jpg`;
     document.body.appendChild(link);
@@ -362,10 +416,10 @@ export function App() {
           activeTab === 'player' ? 'opacity-100 pointer-events-auto z-10' : 'opacity-0 pointer-events-none z-0'
         }`}
       >
-        {/* Progressive Dual-Buffer Zero-Black-Screen Wallpaper Stage */}
+        {/* Progressive Dual-Buffer + 3-Item Sliding Window Preloader Stage */}
         <WallpaperStage
           wallpaper={currentWallpaper}
-          nextWallpaper={nextWallpaper}
+          preloadWallpapers={preloadWallpapers}
           scaleMode={scaleMode}
           onImageReady={() => setIsCurrentImageLoaded(true)}
           onImageError={handleImageError}
@@ -412,6 +466,7 @@ export function App() {
         onUpdateConfig={handleUpdateConfig}
         isFetching={isFetchingPool}
         poolCount={wallpaperPool.length}
+        detectedWidth={detectedWidth}
       />
 
       {/* MODE 2: CLIENT SHOWCASE & DOWNLOAD HUB */}

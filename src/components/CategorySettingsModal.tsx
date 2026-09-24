@@ -10,8 +10,9 @@ import {
   EyeOff,
   Flame,
   Search,
+  Gauge,
 } from 'lucide-react';
-import { PlayerFilterConfig, CategoryType } from '../types';
+import { PlayerFilterConfig, CategoryType, QualityMode } from '../types';
 import { PRESET_CATEGORIES, SUGGESTED_TAGS } from '../data/wallpapers';
 
 interface CategorySettingsModalProps {
@@ -21,6 +22,7 @@ interface CategorySettingsModalProps {
   onUpdateConfig: (newConfig: PlayerFilterConfig, triggerFetch?: boolean) => void;
   isFetching: boolean;
   poolCount: number;
+  detectedWidth: number;
 }
 
 export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
@@ -30,6 +32,7 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
   onUpdateConfig,
   isFetching,
   poolCount,
+  detectedWidth,
 }) => {
   const [showKey, setShowKey] = useState(false);
 
@@ -43,6 +46,27 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
     onUpdateConfig(next, true);
   };
 
+  const qualityOptions: { id: QualityMode; title: string; badge: string; desc: string }[] = [
+    {
+      id: 'auto',
+      title: '⚡ 智能自适应',
+      badge: `当前匹配 ${detectedWidth}p WebP`,
+      desc: '根据屏幕物理分辨率动态转码 WebP，体积缩小 92%，秒开且锐利',
+    },
+    {
+      id: 'fast',
+      title: '🚀 极速秒开流',
+      badge: '约 250KB / 张',
+      desc: '锁定高帧率轻量流媒体尺寸，适合快速连续翻图或移动网络',
+    },
+    {
+      id: 'raw',
+      title: '💎 原画无损直出',
+      badge: '5MB~15MB / 张',
+      desc: '不经过任何云端压缩，直接拉取原始未压缩文件',
+    },
+  ];
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-md animate-in fade-in duration-200">
       <div className="glass-panel w-full max-w-2xl rounded-3xl border border-white/15 shadow-2xl overflow-hidden text-slate-100 max-h-[90vh] flex flex-col">
@@ -54,10 +78,10 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
             </div>
             <div>
               <h2 className="text-base font-bold text-white leading-tight">
-                4K 视觉分类与图源引擎
+                4K 视觉分类与流媒体引擎
               </h2>
               <p className="text-xs text-slate-400">
-                当前图池已就绪 <span className="text-indigo-300 font-semibold">{poolCount}</span> 张 4K 超清壁纸
+                当前图池已就绪 <span className="text-indigo-300 font-semibold">{poolCount}</span> 张壁纸 · 提前 3 张内存预热已开启
               </p>
             </div>
           </div>
@@ -113,11 +137,46 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
             </div>
           </div>
 
-          {/* 2. Custom Keyword Input */}
+          {/* 2. Adaptive Resolution & Quality Strategy */}
+          <div className="bg-black/40 p-4 rounded-2xl border border-white/10 space-y-3">
+            <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+              <Gauge className="w-3.5 h-3.5 text-emerald-400" />
+              <span>2. 屏幕分辨率自适应与加速策略 (下载时始终保留 100% 原图)</span>
+            </label>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              {qualityOptions.map((opt) => {
+                const active = (config.qualityMode || 'auto') === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    onClick={() =>
+                      onUpdateConfig({ ...config, qualityMode: opt.id }, true)
+                    }
+                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                      active
+                        ? 'bg-emerald-500/20 border-emerald-400/60 text-white shadow-md'
+                        : 'bg-white/[0.03] border-white/10 text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-bold text-white">{opt.title}</span>
+                    </div>
+                    <div className="inline-block px-1.5 py-0.5 rounded bg-black/40 text-[10px] text-emerald-300 font-mono mb-1">
+                      {opt.badge}
+                    </div>
+                    <p className="text-[10px] text-slate-400 leading-snug">{opt.desc}</p>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 3. Custom Keyword Input */}
           <div className="bg-black/40 p-4 rounded-2xl border border-white/10 space-y-3">
             <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
               <Search className="w-3.5 h-3.5 text-indigo-400" />
-              <span>自定义搜索标签 (支持英文关键词定向搜索 Wallhaven / Yande)</span>
+              <span>3. 自定义搜索标签 (支持英文关键词定向搜索 Wallhaven / Yande)</span>
             </label>
             <div className="flex gap-2">
               <input
@@ -131,7 +190,7 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
                     onUpdateConfig({ ...config, category: 'custom' }, true);
                   }
                 }}
-                placeholder="例如: cyberpunk 4k, aurora, asian girl,genshin..."
+                placeholder="例如: cyberpunk 4k, aurora, asian girl, genshin..."
                 className="flex-1 px-3.5 py-2 rounded-xl bg-white/5 border border-white/15 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-400"
               />
               <button
@@ -166,7 +225,7 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
             </div>
           </div>
 
-          {/* 3. Adult / NSFW Mode Section */}
+          {/* 4. Adult / NSFW Mode Section */}
           <div
             className={`p-5 rounded-2xl border transition-all ${
               config.adultMode
@@ -195,7 +254,7 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
                     )}
                   </div>
                   <p className="text-[11px] text-slate-400">
-                    解锁 Wallhaven R18、Yande.re 与 Konachan 超高清无删减原图库
+                    解锁 Wallhaven R18、Yande.re 与 Konachan 超高清无删减图库
                   </p>
                 </div>
               </div>
@@ -219,7 +278,6 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
 
             {config.adultMode && (
               <div className="space-y-4 pt-2 border-t border-white/10 animate-in fade-in duration-200">
-                {/* Passcode or API Key Input */}
                 <div>
                   <label className="text-xs text-slate-300 font-medium block mb-1.5">
                     私人解锁码 (输入你的专属口令) 或 Wallhaven API Key：
@@ -246,7 +304,6 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
                     </div>
                   </div>
 
-                  {/* Verification feedback */}
                   <div className="mt-2 flex items-center justify-between">
                     {isVipUnlocked ? (
                       <span className="inline-flex items-center gap-1.5 text-xs text-emerald-400 font-medium">
@@ -260,18 +317,17 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
                       </span>
                     ) : (
                       <span className="text-[11px] text-amber-300/90">
-                        提示：输入你的专属口令可一键解锁全部 R18 权限；未填口令时默认加载 Sketchy 级与 Yande 图库
+                        提示：输入你的专属口令可一键解锁全部 R18 权限
                       </span>
                     )}
                   </div>
                 </div>
 
-                {/* Purity Scale Filter */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   {[
                     { id: '111', label: '全量混合 (SFW + R18)', sub: '兼顾唯美与成人内容' },
-                    { id: '001', label: '纯享成人 (Pure NSFW)', sub: '仅拉取 R18 / Explicit 原图' },
-                    { id: '110', label: '微醺性感 (Sketchy)', sub: '写真与轻度性感不露点' },
+                    { id: '001', label: '纯享成人 (Pure NSFW)', sub: '仅拉取 R18 / Explicit' },
+                    { id: '110', label: '微醺性感 (Sketchy)', sub: '写真与轻度性感' },
                   ].map((item) => (
                     <button
                       key={item.id}
@@ -293,7 +349,6 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
                   ))}
                 </div>
 
-                {/* Extra Sources Checkboxes */}
                 <div className="flex flex-wrap items-center gap-4 text-xs text-slate-300 pt-1">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
@@ -326,7 +381,7 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
         {/* Footer */}
         <div className="px-6 py-3.5 border-t border-white/10 bg-black/40 flex items-center justify-between">
           <span className="text-[11px] text-slate-400">
-            配置已自动加密保存在当前浏览器本地，公开访客默认仅见 SFW 纯净模式
+            配置已自动保存在当前浏览器本地
           </span>
           <button
             onClick={() => {

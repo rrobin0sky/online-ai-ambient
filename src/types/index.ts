@@ -9,12 +9,15 @@ export type CategoryType =
   | 'minimalist'
   | 'custom';
 
+export type QualityMode = 'auto' | 'fast' | 'raw';
+
 export interface WallpaperItem {
   id: string;
   title: string;
   category: string;
   url: string;
   previewUrl: string;
+  rawUrl?: string;
   source: 'Unsplash' | 'Bing' | 'Wallhaven' | 'Yande.re' | 'Konachan';
   location?: string;
   resolution?: string;
@@ -39,4 +42,5 @@ export interface PlayerFilterConfig {
   passcodeOrKey: string;
   enableYande: boolean;
   enableKonachan: boolean;
+  qualityMode: QualityMode;
 }
