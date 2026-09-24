@@ -19,6 +19,7 @@ export interface WallpaperItem {
   location?: string;
   resolution?: string;
   purity?: string;
+  aspectRatio?: number;
 }
 
 export type SoundType = 'rain' | 'fire' | 'waves' | 'forest' | 'off';

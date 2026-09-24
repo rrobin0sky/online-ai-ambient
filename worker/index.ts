@@ -14,6 +14,7 @@ interface UnifiedWallpaper {
   location?: string;
   resolution?: string;
   purity?: string;
+  aspectRatio?: number;
 }
 
 const CORS_HEADERS = {
@@ -46,11 +47,28 @@ const CATEGORY_QUERY_MAP: Record<string, { q: string; categories: string }> = {
   minimalist: { q: 'minimalist OR dark aesthetic OR oled OR abstract', categories: '100' },
 };
 
+function getCanonicalReferer(targetHost: string, protocol: string): string {
+  const host = targetHost.toLowerCase();
+  if (host.includes('wallhaven.cc')) {
+    return 'https://wallhaven.cc/';
+  }
+  if (host.includes('yande.re')) {
+    return 'https://yande.re/';
+  }
+  if (host.includes('konachan.com')) {
+    return 'https://konachan.com/';
+  }
+  if (host.includes('konachan.net')) {
+    return 'https://konachan.net/';
+  }
+  return `${protocol}//${targetHost}/`;
+}
+
 async function fetchWallhaven(params: {
   category: string;
   customQuery: string;
   adultMode: boolean;
-  purityMode: string; // '100' | '110' | '111' | '011' | '001'
+  purityMode: string;
   apiKey: string;
   origin: string;
 }): Promise<UnifiedWallpaper[]> {
@@ -72,7 +90,7 @@ async function fetchWallhaven(params: {
       if (apiKey) {
         purity = purityMode || '111';
       } else {
-        purity = '110'; // Sketchy allowed without API key
+        purity = '110';
       }
     }
 
@@ -82,10 +100,10 @@ async function fetchWallhaven(params: {
     searchUrl.searchParams.set('atleast', '1920x1080');
     searchUrl.searchParams.set('sorting', 'random');
     searchUrl.searchParams.set('seed', randomSeed());
+
     if (queryStr) {
-      // If adult mode + beauty/anime, remove restrictive SFW query if purity is pure NSFW
       if (adultMode && purity === '001' && (category === 'beauty' || category === 'anime' || category === 'all')) {
-        // Let category bitmask + purity=001 do the heavy lifting for richer NSFW pool
+        // Pure NSFW mode: let category bitmask + purity=001 return richest pool
       } else {
         searchUrl.searchParams.set('q', queryStr);
       }
@@ -105,24 +123,31 @@ async function fetchWallhaven(params: {
     const json: any = await res.json();
     if (!json || !Array.isArray(json.data)) return [];
 
-    return json.data.slice(0, 14).map((item: any) => {
-      const rawUrl = item.path;
-      const rawThumb = item.thumbs?.large || item.thumbs?.original || item.path;
-      const proxiedUrl = `${origin}/api/image-proxy?url=${encodeURIComponent(rawUrl)}`;
-      const proxiedThumb = `${origin}/api/image-proxy?url=${encodeURIComponent(rawThumb)}`;
+    // Filter out ultra-massive > 15MB files to avoid slow loading stalls
+    return json.data
+      .filter((item: any) => !item.file_size || item.file_size < 16 * 1024 * 1024)
+      .slice(0, 15)
+      .map((item: any) => {
+        const rawUrl = item.path;
+        const rawThumb = item.thumbs?.large || item.thumbs?.original || item.thumbs?.small || item.path;
+        const proxiedUrl = `${origin}/api/image-proxy?url=${encodeURIComponent(rawUrl)}`;
+        const proxiedThumb = `${origin}/api/image-proxy?url=${encodeURIComponent(rawThumb)}`;
+        const w = Number(item.dimension_x) || 3840;
+        const h = Number(item.dimension_y) || 2160;
 
-      return {
-        id: `wh_${item.id}`,
-        title: `Wallhaven · ${(item.category || '4K').toUpperCase()}`,
-        category,
-        url: proxiedUrl,
-        previewUrl: proxiedThumb,
-        source: 'Wallhaven',
-        location: `${item.resolution || '4K UHD'} · ${(item.purity || 'sfw').toUpperCase()}`,
-        resolution: item.resolution,
-        purity: item.purity,
-      };
-    });
+        return {
+          id: `wh_${item.id}`,
+          title: `Wallhaven · ${(item.category || '4K').toUpperCase()}`,
+          category,
+          url: proxiedUrl,
+          previewUrl: proxiedThumb,
+          source: 'Wallhaven',
+          location: `${item.resolution || '4K UHD'} · ${(item.purity || 'sfw').toUpperCase()}`,
+          resolution: item.resolution,
+          purity: item.purity,
+          aspectRatio: w / h,
+        };
+      });
   } catch {
     return [];
   }
@@ -137,7 +162,6 @@ async function fetchYande(params: {
 }): Promise<UnifiedWallpaper[]> {
   try {
     const { category, customQuery, adultMode, purityMode, origin } = params;
-    // Yande is great for anime / illustration / adult mode
     if (category !== 'anime' && category !== 'all' && category !== 'custom' && !adultMode) {
       return [];
     }
@@ -146,7 +170,7 @@ async function fetchYande(params: {
     if (!adultMode) {
       tags.push('rating:s');
     } else if (purityMode === '001') {
-      tags.push('-rating:s'); // Explicit / Questionable only
+      tags.push('-rating:s');
     }
 
     if (category === 'custom' && customQuery.trim()) {
@@ -154,7 +178,7 @@ async function fetchYande(params: {
     }
 
     const url = new URL('https://yande.re/post.json');
-    url.searchParams.set('limit', '10');
+    url.searchParams.set('limit', '12');
     url.searchParams.set('tags', tags.join(' '));
 
     const res = await fetch(url.toString(), {
@@ -167,11 +191,15 @@ async function fetchYande(params: {
     if (!Array.isArray(posts)) return [];
 
     return posts
-      .filter((p) => p && (p.sample_url || p.file_url))
+      .filter((p) => p && (p.sample_url || p.jpeg_url || p.file_url))
       .slice(0, 8)
       .map((p) => {
-        const rawFull = p.sample_url || p.file_url;
+        // Always prefer fast high-res JPEG sample_url/jpeg_url (~1MB) over 35MB raw PNG for smooth streaming
+        const rawFull = p.sample_url || p.jpeg_url || p.file_url;
         const rawPreview = p.preview_url || rawFull;
+        const w = Number(p.width) || 2560;
+        const h = Number(p.height) || 1440;
+
         return {
           id: `yd_${p.id}`,
           title: `Yande.re · #${p.id}`,
@@ -179,8 +207,9 @@ async function fetchYande(params: {
           url: `${origin}/api/image-proxy?url=${encodeURIComponent(rawFull)}`,
           previewUrl: `${origin}/api/image-proxy?url=${encodeURIComponent(rawPreview)}`,
           source: 'Yande.re',
-          location: `${p.width}×${p.height} · Rating ${(p.rating || 's').toUpperCase()}`,
-          resolution: `${p.width}x${p.height}`,
+          location: `${w}×${h} · Rating ${(p.rating || 's').toUpperCase()}`,
+          resolution: `${w}x${h}`,
+          aspectRatio: w / h,
         };
       });
   } catch {
@@ -222,11 +251,14 @@ async function fetchKonachan(params: {
     if (!Array.isArray(posts)) return [];
 
     return posts
-      .filter((p) => p && (p.sample_url || p.file_url))
+      .filter((p) => p && (p.sample_url || p.jpeg_url || p.file_url))
       .slice(0, 6)
       .map((p) => {
-        const rawFull = p.sample_url || p.file_url;
+        const rawFull = p.sample_url || p.jpeg_url || p.file_url;
         const rawPreview = p.preview_url || rawFull;
+        const w = Number(p.width) || 2560;
+        const h = Number(p.height) || 1440;
+
         return {
           id: `kn_${p.id}`,
           title: `Konachan · #${p.id}`,
@@ -234,8 +266,9 @@ async function fetchKonachan(params: {
           url: `${origin}/api/image-proxy?url=${encodeURIComponent(rawFull)}`,
           previewUrl: `${origin}/api/image-proxy?url=${encodeURIComponent(rawPreview)}`,
           source: 'Konachan',
-          location: `${p.width}×${p.height} · Rating ${(p.rating || 's').toUpperCase()}`,
-          resolution: `${p.width}x${p.height}`,
+          location: `${w}×${h} · Rating ${(p.rating || 's').toUpperCase()}`,
+          resolution: `${w}x${h}`,
+          aspectRatio: w / h,
         };
       });
   } catch {
@@ -261,7 +294,6 @@ export default {
       const enableYande = url.searchParams.get('yande') !== '0';
       const enableKonachan = url.searchParams.get('konachan') !== '0';
 
-      // Determine effective Wallhaven API Key
       let effectiveApiKey = '';
       let unlockedByPasscode = false;
       if (passcodeOrKey === VIP_PASSCODE) {
@@ -333,7 +365,7 @@ export default {
       );
     }
 
-    // 2. High-Speed Edge Image Proxy (bypasses hotlink 403 & GFW blocks)
+    // 2. High-Speed Edge Image Proxy with Canonical Referer Spoofing
     if (url.pathname === '/api/image-proxy') {
       const targetUrl = url.searchParams.get('url');
       if (!targetUrl || !targetUrl.startsWith('https://')) {
@@ -342,12 +374,20 @@ export default {
 
       try {
         const parsedTarget = new URL(targetUrl);
+        const canonicalReferer = getCanonicalReferer(parsedTarget.host, parsedTarget.protocol);
+
         const imgRes = await fetch(targetUrl, {
           headers: {
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-            Referer: `${parsedTarget.protocol}//${parsedTarget.host}/`,
+            'User-Agent':
+              'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+            Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+            Referer: canonicalReferer,
           },
-        });
+          cf: {
+            cacheEverything: true,
+            cacheTtl: 604800,
+          },
+        } as RequestInit);
 
         if (!imgRes.ok) {
           return new Response(`Upstream error ${imgRes.status}`, { status: imgRes.status, headers: CORS_HEADERS });

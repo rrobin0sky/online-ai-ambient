@@ -14,9 +14,12 @@ import {
   ChevronDown,
   LayoutGrid,
   RefreshCw,
+  Frame,
+  ImageDown,
 } from 'lucide-react';
 import { SoundType, PlayerFilterConfig } from '../types';
 import { PRESET_CATEGORIES } from '../data/wallpapers';
+import { ScaleMode } from './WallpaperStage';
 
 interface PlayerControlsProps {
   onPrev: () => void;
@@ -34,6 +37,9 @@ interface PlayerControlsProps {
   onOpenCategoryModal: () => void;
   onRefreshPool: () => void;
   isFetchingPool: boolean;
+  scaleMode: ScaleMode;
+  onToggleScaleMode: () => void;
+  onSaveCurrentImage: () => void;
   uiVisible: boolean;
 }
 
@@ -53,6 +59,9 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   onOpenCategoryModal,
   onRefreshPool,
   isFetchingPool,
+  scaleMode,
+  onToggleScaleMode,
+  onSaveCurrentImage,
   uiVisible,
 }) => {
   const [showSoundMenu, setShowSoundMenu] = useState(false);
@@ -67,6 +76,12 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
 
   const activeCategoryMeta =
     PRESET_CATEGORIES.find((c) => c.id === filterConfig.category) || PRESET_CATEGORIES[0];
+
+  const scaleLabelMap: Record<ScaleMode, string> = {
+    auto: '智能画幅',
+    cover: '铺满全屏',
+    fit: '完整画幅',
+  };
 
   return (
     <div
@@ -116,13 +131,13 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
       )}
 
       {/* Main Bottom Floating Bar */}
-      <div className="glass-panel px-3.5 sm:px-4 py-2 rounded-full flex items-center gap-1.5 sm:gap-3 shadow-2xl pointer-events-auto border border-white/10 max-w-full overflow-x-auto">
-        {/* Prev / Next controls */}
+      <div className="glass-panel px-3.5 sm:px-4 py-2 rounded-full flex items-center gap-1.5 sm:gap-2.5 shadow-2xl pointer-events-auto border border-white/10 max-w-full overflow-x-auto">
+        {/* Prev / Next / Refresh controls */}
         <div className="flex items-center gap-0.5 shrink-0">
           <button
             onClick={onPrev}
             className="p-2 rounded-full text-slate-300 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
-            title="上一张壁纸 (Left Arrow)"
+            title="上一张壁纸 (←)"
           >
             <ChevronLeft className="w-4 h-4" />
           </button>
@@ -130,7 +145,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
           <button
             onClick={onNext}
             className="p-2 rounded-full text-slate-300 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
-            title="下一张壁纸 (Right Arrow)"
+            title="下一张壁纸 (→)"
           >
             <ChevronRight className="w-4 h-4" />
           </button>
@@ -139,7 +154,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
             onClick={onRefreshPool}
             disabled={isFetchingPool}
             className="p-2 rounded-full text-slate-300 hover:text-white hover:bg-white/10 transition-colors cursor-pointer disabled:opacity-50"
-            title="从云端刷新一批新 4K 壁纸 (R 键)"
+            title="从云端换一批新壁纸 (R 键)"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isFetchingPool ? 'animate-spin text-indigo-400' : ''}`} />
           </button>
@@ -168,6 +183,16 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
           )}
         </button>
 
+        {/* Aspect Scale Mode Toggle (Auto / Cover / Fit) */}
+        <button
+          onClick={onToggleScaleMode}
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium text-slate-300 hover:text-white hover:bg-white/10 transition-colors cursor-pointer shrink-0"
+          title="切换画幅比例模式：智能识别竖图 / 铺满全屏 / 完整居中 (按 S 键)"
+        >
+          <Frame className="w-3.5 h-3.5 text-indigo-300" />
+          <span className="hidden md:inline">{scaleLabelMap[scaleMode]}</span>
+        </button>
+
         <div className="h-4 w-[1px] bg-white/10 shrink-0" />
 
         {/* Auto play status */}
@@ -184,12 +209,10 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
           <span className="hidden sm:inline">{autoPlay ? '轮播中' : '已暂停'}</span>
         </button>
 
-        <div className="h-4 w-[1px] bg-white/10 shrink-0" />
-
         {/* Ambient Sound Trigger */}
         <button
           onClick={() => setShowSoundMenu(!showSoundMenu)}
-          className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all cursor-pointer shrink-0 ${
+          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-all cursor-pointer shrink-0 ${
             currentSound !== 'off'
               ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
               : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
@@ -205,6 +228,15 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
         </button>
 
         <div className="h-4 w-[1px] bg-white/10 shrink-0" />
+
+        {/* Save Current Wallpaper Image */}
+        <button
+          onClick={onSaveCurrentImage}
+          className="p-2 rounded-full text-slate-300 hover:text-white hover:bg-white/10 transition-colors cursor-pointer shrink-0"
+          title="下载保存当前 4K 原图 (按 D 键)"
+        >
+          <ImageDown className="w-4 h-4" />
+        </button>
 
         {/* Fullscreen Toggle */}
         <button
