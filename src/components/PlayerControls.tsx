@@ -41,7 +41,20 @@ interface PlayerControlsProps {
   onToggleScaleMode: () => void;
   onSaveCurrentImage: () => void;
   uiVisible: boolean;
+  lang?: 'zh' | 'en';
 }
+
+const CATEGORY_LABELS_EN: Record<string, string> = {
+  all: 'Featured',
+  nature: 'Nature',
+  scifi: 'Sci-Fi',
+  anime: 'Anime',
+  beauty: 'Portraits',
+  supercars: 'Supercars',
+  cityscape: 'Cityscape',
+  minimalist: 'Minimalist',
+  custom: 'Custom Tag',
+};
 
 export const PlayerControls: React.FC<PlayerControlsProps> = ({
   onPrev,
@@ -63,24 +76,28 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   onToggleScaleMode,
   onSaveCurrentImage,
   uiVisible,
+  lang = 'zh',
 }) => {
+  const isZh = lang !== 'en';
   const [showSoundMenu, setShowSoundMenu] = useState(false);
 
   const soundOptions: { type: SoundType; label: string; icon: React.ReactNode }[] = [
-    { type: 'rain', label: '细雨微风', icon: <CloudRain className="w-3.5 h-3.5" /> },
-    { type: 'waves', label: '深蓝潮汐', icon: <Waves className="w-3.5 h-3.5" /> },
-    { type: 'fire', label: '壁炉柴火', icon: <Flame className="w-3.5 h-3.5" /> },
-    { type: 'forest', label: '林间微风', icon: <Trees className="w-3.5 h-3.5" /> },
-    { type: 'off', label: '静音', icon: <VolumeX className="w-3.5 h-3.5" /> },
+    { type: 'rain', label: isZh ? '细雨微风' : 'Rain', icon: <CloudRain className="w-3.5 h-3.5" /> },
+    { type: 'waves', label: isZh ? '深蓝潮汐' : 'Waves', icon: <Waves className="w-3.5 h-3.5" /> },
+    { type: 'fire', label: isZh ? '壁炉柴火' : 'Fireplace', icon: <Flame className="w-3.5 h-3.5" /> },
+    { type: 'forest', label: isZh ? '林间微风' : 'Forest', icon: <Trees className="w-3.5 h-3.5" /> },
+    { type: 'off', label: isZh ? '静音' : 'Mute', icon: <VolumeX className="w-3.5 h-3.5" /> },
   ];
 
   const activeCategoryMeta =
     PRESET_CATEGORIES.find((c) => c.id === filterConfig.category) || PRESET_CATEGORIES[0];
 
+  const categoryLabel = isZh ? activeCategoryMeta.label : (CATEGORY_LABELS_EN[filterConfig.category] || activeCategoryMeta.label);
+
   const scaleLabelMap: Record<ScaleMode, string> = {
-    auto: '智能画幅',
-    cover: '铺满全屏',
-    fit: '完整画幅',
+    auto: isZh ? '智能画幅' : 'Auto Scale',
+    cover: isZh ? '铺满全屏' : 'Cover',
+    fit: isZh ? '完整画幅' : 'Fit View',
   };
 
   return (
@@ -170,11 +187,11 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
               ? 'bg-rose-500/20 text-rose-200 border border-rose-500/40 hover:bg-rose-500/30'
               : 'bg-indigo-500/15 text-indigo-200 border border-indigo-500/30 hover:bg-indigo-500/25'
           }`}
-          title="选择图片分类与 NSFW 模式 (按 C 键)"
+          title={isZh ? "选择图片分类与 NSFW 模式 (按 C 键)" : "Select categories & NSFW filter (Key: C)"}
         >
           <LayoutGrid className="w-3.5 h-3.5" />
           <span>
-            {activeCategoryMeta.emoji} {activeCategoryMeta.label}
+            {activeCategoryMeta.emoji} {categoryLabel}
           </span>
           {filterConfig.adultMode && (
             <span className="ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-rose-600 text-white">
@@ -187,7 +204,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
         <button
           onClick={onToggleScaleMode}
           className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium text-slate-300 hover:text-white hover:bg-white/10 transition-colors cursor-pointer shrink-0"
-          title="切换画幅比例模式：智能识别竖图 / 铺满全屏 / 完整居中 (按 S 键)"
+          title={isZh ? "切换画幅比例模式：智能识别竖图 / 铺满全屏 / 完整居中 (按 S 键)" : "Toggle aspect scale mode (Key: S)"}
         >
           <Frame className="w-3.5 h-3.5 text-indigo-300" />
           <span className="hidden md:inline">{scaleLabelMap[scaleMode]}</span>
@@ -203,10 +220,10 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
               ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
               : 'text-slate-400 hover:text-slate-200 hover:bg-white/5 border border-transparent'
           }`}
-          title="自动轮播切换 (Space 键)"
+          title={isZh ? "自动轮播切换 (Space 键)" : "Toggle autoplay (Space)"}
         >
           <span className={`w-1.5 h-1.5 rounded-full ${autoPlay ? 'bg-emerald-400 animate-ping' : 'bg-slate-500'}`} />
-          <span className="hidden sm:inline">{autoPlay ? '轮播中' : '已暂停'}</span>
+          <span className="hidden sm:inline">{autoPlay ? (isZh ? '轮播中' : 'Playing') : (isZh ? '已暂停' : 'Paused')}</span>
         </button>
 
         {/* Ambient Sound Trigger */}
@@ -217,12 +234,12 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
               ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
               : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
           }`}
-          title="环境白噪音"
+          title={isZh ? "环境白噪音" : "Soundscape"}
         >
           <SlidersHorizontal className="w-3.5 h-3.5" />
           <span className="hidden md:inline">
             {currentSound === 'off'
-              ? '白噪音'
+              ? (isZh ? '白噪音' : 'Sound')
               : soundOptions.find((o) => o.type === currentSound)?.label}
           </span>
         </button>
@@ -233,7 +250,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
         <button
           onClick={onSaveCurrentImage}
           className="p-2 rounded-full text-slate-300 hover:text-white hover:bg-white/10 transition-colors cursor-pointer shrink-0"
-          title="下载保存当前 4K 原图 (按 D 键)"
+          title={isZh ? "下载保存当前 4K 原图 (按 D 键)" : "Download current 4K wallpaper (Key: D)"}
         >
           <ImageDown className="w-4 h-4" />
         </button>
@@ -242,7 +259,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
         <button
           onClick={onToggleFullscreen}
           className="p-2 rounded-full text-slate-300 hover:text-white hover:bg-white/10 transition-colors cursor-pointer shrink-0"
-          title="全屏切换 (按 F 键)"
+          title={isZh ? "全屏切换 (按 F 键)" : "Toggle Fullscreen (Key: F)"}
         >
           {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
         </button>
@@ -251,9 +268,9 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
         <button
           onClick={onOpenShowcase}
           className="flex items-center gap-1 pl-1 text-xs text-indigo-300 hover:text-indigo-200 cursor-pointer font-medium shrink-0"
-          title="查看 macOS 原生桌面版特性"
+          title={isZh ? "查看 macOS 原生桌面版特性" : "Explore macOS Desktop App"}
         >
-          <span className="hidden lg:inline">客户端</span>
+          <span className="hidden lg:inline">{isZh ? '客户端' : 'Mac App'}</span>
           <ChevronDown className="w-3.5 h-3.5 animate-bounce" />
         </button>
       </div>

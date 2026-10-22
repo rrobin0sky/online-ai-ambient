@@ -7,6 +7,31 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>Ambient 4K — 沉浸式极简 4K 氛围工作台 & macOS 原生应用</title>
     <meta name="description" content="专为 Mac 与 iPad 打造的沉浸式极简 4K 视觉画廊与环境白噪音空间。网页端全屏即开即用，支持原生 macOS 客户端一键下载。" />
+    <!-- Anti-Flicker BinOS Universal Theme & Lang Init -->
+    <script>
+      (function(){
+        try {
+          var params = new URLSearchParams(window.location.search);
+          var urlTheme = params.get('b0_theme');
+          var saved = urlTheme || localStorage.getItem('b0_theme');
+          var isDark = saved ? (saved === 'dark') : true;
+          if (isDark) {
+            document.documentElement.classList.add('dark');
+            document.documentElement.classList.remove('light');
+          } else {
+            document.documentElement.classList.remove('dark');
+            document.documentElement.classList.add('light');
+          }
+          var urlLang = params.get('b0_lang');
+          var savedLang = urlLang || localStorage.getItem('b0_lang');
+          var isZh = savedLang ? savedLang.toLowerCase().startsWith('zh') : true;
+          document.documentElement.setAttribute('lang', isZh ? 'zh-CN' : 'en');
+          if (params.get('b0_embedded') === '1' || window.top !== window.self) {
+            document.documentElement.classList.add('b0-embedded');
+          }
+        } catch(e) {}
+      })();
+    </script>
     <!-- 引入高质感西文字体与思源黑体回退 -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>

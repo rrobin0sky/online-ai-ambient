@@ -65,6 +65,78 @@ function adaptCuratedPool(items: WallpaperItem[], targetWidth: number): Wallpape
 }
 
 export function App() {
+  const [lang, setLang] = useState<'zh' | 'en'>(() => {
+    try {
+      const p = new URLSearchParams(window.location.search).get('b0_lang');
+      const saved = p || localStorage.getItem('b0_lang');
+      return saved && saved.toLowerCase().startsWith('en') ? 'en' : 'zh';
+    } catch {
+      return 'zh';
+    }
+  });
+
+  const [isDark, setIsDark] = useState<boolean>(() => {
+    try {
+      const p = new URLSearchParams(window.location.search).get('b0_theme');
+      const saved = p || localStorage.getItem('b0_theme');
+      return saved ? saved === 'dark' : true;
+    } catch {
+      return true;
+    }
+  });
+
+  useEffect(() => {
+    const handleMessage = (e: MessageEvent) => {
+      if (!e.data) return;
+      if (e.data.type === 'B0_THEME_CHANGE') {
+        const dark = e.data.theme === 'dark';
+        setIsDark(dark);
+        if (dark) {
+          document.documentElement.classList.add('dark');
+          document.documentElement.classList.remove('light');
+        } else {
+          document.documentElement.classList.remove('dark');
+          document.documentElement.classList.add('light');
+        }
+      } else if (e.data.type === 'B0_LANG_CHANGE') {
+        const isZh = !e.data.lang || e.data.lang.toLowerCase().startsWith('zh');
+        const target = isZh ? 'zh' : 'en';
+        setLang(target);
+        document.documentElement.setAttribute('lang', isZh ? 'zh-CN' : 'en');
+      }
+    };
+
+    const handleThemeEvent = (e: any) => {
+      const dark = e.detail?.theme === 'dark';
+      setIsDark(dark);
+      if (dark) {
+        document.documentElement.classList.add('dark');
+        document.documentElement.classList.remove('light');
+      } else {
+        document.documentElement.classList.remove('dark');
+        document.documentElement.classList.add('light');
+      }
+    };
+
+    const handleLangEvent = (e: any) => {
+      const raw = e.detail?.lang || e.data?.lang;
+      if (raw) {
+        const isZh = raw.toLowerCase().startsWith('zh');
+        setLang(isZh ? 'zh' : 'en');
+        document.documentElement.setAttribute('lang', isZh ? 'zh-CN' : 'en');
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    window.addEventListener('b0-theme-change', handleThemeEvent);
+    window.addEventListener('b0-lang-change', handleLangEvent);
+    return () => {
+      window.removeEventListener('message', handleMessage);
+      window.removeEventListener('b0-theme-change', handleThemeEvent);
+      window.removeEventListener('b0-lang-change', handleLangEvent);
+    };
+  }, []);
+
   const [activeTab, setActiveTab] = useState<'player' | 'showcase'>('player');
   const [filterConfig, setFilterConfig] = useState<PlayerFilterConfig>(loadSavedConfig);
   const [detectedWidth, setDetectedWidth] = useState<number>(() =>
@@ -398,7 +470,9 @@ export function App() {
   };
 
   return (
-    <div className="relative w-screen h-screen overflow-hidden bg-slate-950 select-none">
+    <div className={`relative w-screen h-screen overflow-hidden select-none transition-colors duration-300 ${
+      isDark ? 'bg-slate-950 text-slate-100' : 'bg-[#f5f5f7] text-[#1d1d1f]'
+    }`}>
       {/* Top Header Navigation */}
       <HeaderNav
         activeTab={activeTab}
@@ -408,6 +482,7 @@ export function App() {
         }}
         onDownloadClick={handleDownload}
         uiVisible={activeTab === 'showcase' || uiVisible || isCategoryModalOpen}
+        lang={lang}
       />
 
       {/* MODE 1: FULLSCREEN 4K AMBIENT PLAYER */}
@@ -455,6 +530,7 @@ export function App() {
           onToggleScaleMode={toggleScaleMode}
           onSaveCurrentImage={handleSaveCurrentImage}
           uiVisible={uiVisible || isCategoryModalOpen}
+          lang={lang}
         />
       </div>
 
@@ -475,7 +551,7 @@ export function App() {
           activeTab === 'showcase' ? 'opacity-100 pointer-events-auto z-20' : 'opacity-0 pointer-events-none z-0'
         }`}
       >
-        <ShowcaseSection onBackToPlayer={() => setActiveTab('player')} />
+        <ShowcaseSection onBackToPlayer={() => setActiveTab('player')} lang={lang} isDark={isDark} />
       </div>
     </div>
   );

@@ -7,6 +7,7 @@ interface HeaderNavProps {
   onTabChange: (tab: 'player' | 'showcase') => void;
   onDownloadClick: () => void;
   uiVisible: boolean;
+  lang?: 'zh' | 'en';
 }
 
 export const HeaderNav: React.FC<HeaderNavProps> = ({
@@ -14,7 +15,9 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
   onTabChange,
   onDownloadClick,
   uiVisible,
+  lang = 'zh',
 }) => {
+  const isZh = lang !== 'en';
   return (
     <header
       className={`fixed top-4 left-0 right-0 z-50 flex justify-center px-4 transition-all duration-500 pointer-events-none ${
@@ -48,7 +51,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
             }`}
           >
             <Monitor className="w-3.5 h-3.5" />
-            <span>沉浸播放</span>
+            <span>{isZh ? '沉浸播放' : 'Ambient Player'}</span>
           </button>
 
           <button
@@ -60,7 +63,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
             }`}
           >
             <Compass className="w-3.5 h-3.5" />
-            <span>探索原生客户端</span>
+            <span>{isZh ? '探索原生客户端' : 'Mac App'}</span>
           </button>
         </div>
 
@@ -70,8 +73,8 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
           className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-white text-black hover:bg-slate-200 transition-all shadow-md hover:scale-[1.02] cursor-pointer ml-1"
         >
           <Download className="w-3.5 h-3.5" />
-          <span className="hidden md:inline">下载 macOS 版</span>
-          <span className="md:hidden">下载</span>
+          <span className="hidden md:inline">{isZh ? '下载 macOS 版' : 'Download for Mac'}</span>
+          <span className="md:hidden">{isZh ? '下载' : 'Download'}</span>
         </button>
 
         {/* GitHub link */}
