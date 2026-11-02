@@ -9,6 +9,7 @@ interface WallpaperStageProps {
   scaleMode: ScaleMode;
   onImageReady: (id: string) => void;
   onImageError: (id: string) => void;
+  uiVisible?: boolean;
 }
 
 interface LayerState {
@@ -24,6 +25,7 @@ export const WallpaperStage: React.FC<WallpaperStageProps> = ({
   scaleMode,
   onImageReady,
   onImageError,
+  uiVisible = true,
 }) => {
   const [activeLayer, setActiveLayer] = useState<LayerState>({
     item: wallpaper,
@@ -198,7 +200,7 @@ export const WallpaperStage: React.FC<WallpaperStageProps> = ({
       {previousLayer && renderLayerContent(previousLayer, false)}
       {renderLayerContent(activeLayer, true)}
 
-      {isLoadingFullRes && (
+      {isLoadingFullRes && uiVisible && (
         <div className="fixed top-16 right-6 z-30 pointer-events-none flex items-center gap-2 px-3 py-1 rounded-full bg-black/40 backdrop-blur-md border border-white/10 text-[11px] text-indigo-200 animate-pulse">
           <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-ping" />
           <span>高清流优化中...</span>

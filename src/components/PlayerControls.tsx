@@ -16,6 +16,7 @@ import {
   RefreshCw,
   Frame,
   ImageDown,
+  EyeOff,
 } from 'lucide-react';
 import { SoundType, PlayerFilterConfig } from '../types';
 import { PRESET_CATEGORIES } from '../data/wallpapers';
@@ -40,6 +41,7 @@ interface PlayerControlsProps {
   scaleMode: ScaleMode;
   onToggleScaleMode: () => void;
   onSaveCurrentImage: () => void;
+  onToggleZenMode?: () => void;
   uiVisible: boolean;
   lang?: 'zh' | 'en';
 }
@@ -75,6 +77,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   scaleMode,
   onToggleScaleMode,
   onSaveCurrentImage,
+  onToggleZenMode,
   uiVisible,
   lang = 'zh',
 }) => {
@@ -254,6 +257,17 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
         >
           <ImageDown className="w-4 h-4" />
         </button>
+
+        {/* Zen Mode Toggle */}
+        {onToggleZenMode && (
+          <button
+            onClick={onToggleZenMode}
+            className="p-2 rounded-full text-slate-300 hover:text-white hover:bg-white/10 transition-colors cursor-pointer shrink-0"
+            title={isZh ? "纯净看图：隐藏所有控制菜单与时钟 (按 H 键)" : "Zen Mode: Hide all UI and clock (Key: H)"}
+          >
+            <EyeOff className="w-4 h-4" />
+          </button>
+        )}
 
         {/* Fullscreen Toggle */}
         <button

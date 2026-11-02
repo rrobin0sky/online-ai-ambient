@@ -152,6 +152,10 @@ export function App() {
   const [volume, setVolume] = useState(0.5);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [uiVisible, setUiVisible] = useState(true);
+  const uiVisibleRef = useRef(uiVisible);
+  useEffect(() => {
+    uiVisibleRef.current = uiVisible;
+  }, [uiVisible]);
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [isFetchingPool, setIsFetchingPool] = useState(false);
   const [isCurrentImageLoaded, setIsCurrentImageLoaded] = useState(false);
@@ -334,6 +338,28 @@ export function App() {
     }
   }, [activeTab, isCategoryModalOpen]);
 
+  // Only extends idle timer if UI is already visible; keeps navigation quiet when UI is hidden
+  const extendIdleTimerIfVisible = useCallback(() => {
+    if (!uiVisibleRef.current) return;
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+
+    if (activeTab === 'player' && !isCategoryModalOpen) {
+      hideTimerRef.current = setTimeout(() => {
+        setUiVisible(false);
+      }, 3500);
+    }
+  }, [activeTab, isCategoryModalOpen]);
+
+  // Toggle Zen Mode (pure wallpaper view vs normal UI)
+  const handleToggleUi = useCallback(() => {
+    if (uiVisibleRef.current) {
+      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+      setUiVisible(false);
+    } else {
+      resetIdleTimer();
+    }
+  }, [resetIdleTimer]);
+
   useEffect(() => {
     const handleMouseMove = () => resetIdleTimer();
     window.addEventListener('mousemove', handleMouseMove);
@@ -408,26 +434,29 @@ export function App() {
       if (e.code === 'Space') {
         e.preventDefault();
         setAutoPlay((prev) => !prev);
-        resetIdleTimer();
+        extendIdleTimerIfVisible();
       } else if (e.code === 'ArrowRight') {
         e.preventDefault();
         handleNext();
-        resetIdleTimer();
+        extendIdleTimerIfVisible();
       } else if (e.code === 'ArrowLeft') {
         e.preventDefault();
         handlePrev();
-        resetIdleTimer();
+        extendIdleTimerIfVisible();
+      } else if (e.code === 'KeyH') {
+        e.preventDefault();
+        handleToggleUi();
       } else if (e.code === 'KeyF') {
         e.preventDefault();
         toggleFullscreen();
       } else if (e.code === 'KeyS') {
         e.preventDefault();
         toggleScaleMode();
-        resetIdleTimer();
+        extendIdleTimerIfVisible();
       } else if (e.code === 'KeyD') {
         e.preventDefault();
         handleSaveCurrentImage();
-        resetIdleTimer();
+        extendIdleTimerIfVisible();
       } else if (e.code === 'KeyC') {
         e.preventDefault();
         setIsCategoryModalOpen((prev) => !prev);
@@ -435,7 +464,7 @@ export function App() {
       } else if (e.code === 'KeyR') {
         e.preventDefault();
         fetchCloudWallpapers(filterConfig, false);
-        resetIdleTimer();
+        extendIdleTimerIfVisible();
       } else if (e.code === 'Escape') {
         if (isCategoryModalOpen) {
           setIsCategoryModalOpen(false);
@@ -450,7 +479,8 @@ export function App() {
   }, [
     handleNext,
     handlePrev,
-    resetIdleTimer,
+    extendIdleTimerIfVisible,
+    handleToggleUi,
     activeTab,
     isCategoryModalOpen,
     fetchCloudWallpapers,
@@ -490,6 +520,16 @@ export function App() {
         className={`absolute inset-0 transition-opacity duration-700 ease-in-out ${
           activeTab === 'player' ? 'opacity-100 pointer-events-auto z-10' : 'opacity-0 pointer-events-none z-0'
         }`}
+        onClick={(e) => {
+          const target = e.target as HTMLElement;
+          if (
+            target === e.currentTarget ||
+            target.tagName === 'IMG' ||
+            target.classList.contains('absolute')
+          ) {
+            handleToggleUi();
+          }
+        }}
       >
         {/* Progressive Dual-Buffer + 3-Item Sliding Window Preloader Stage */}
         <WallpaperStage
@@ -498,6 +538,7 @@ export function App() {
           scaleMode={scaleMode}
           onImageReady={() => setIsCurrentImageLoaded(true)}
           onImageError={handleImageError}
+          uiVisible={uiVisible}
         />
 
         {/* Ambient Clock and Date Widget */}
@@ -529,6 +570,7 @@ export function App() {
           scaleMode={scaleMode}
           onToggleScaleMode={toggleScaleMode}
           onSaveCurrentImage={handleSaveCurrentImage}
+          onToggleZenMode={handleToggleUi}
           uiVisible={uiVisible || isCategoryModalOpen}
           lang={lang}
         />
