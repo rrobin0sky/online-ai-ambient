@@ -395,16 +395,77 @@ export function App() {
     });
   }, []);
 
-  // Save current wallpaper (Always downloads 100% uncompressed rawUrl!)
-  const handleSaveCurrentImage = useCallback(() => {
+  const [downloadNotice, setDownloadNotice] = useState<string | null>(null);
+
+  // Save current wallpaper (Supports File System Save Picker for folder selection & Blob force download)
+  const handleSaveCurrentImage = useCallback(async () => {
     if (!currentWallpaper) return;
-    const link = document.createElement('a');
-    link.href = currentWallpaper.rawUrl || currentWallpaper.url;
-    link.target = '_blank';
-    link.download = `Ambient4K_${currentWallpaper.id}.jpg`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const downloadUrl = currentWallpaper.rawUrl || currentWallpaper.url;
+    const cleanSource = (currentWallpaper.source || 'Wallpaper').replace(/[^a-zA-Z0-9]/g, '');
+    const filename = `Ambient4K_${cleanSource}_${currentWallpaper.id}.jpg`;
+
+    setDownloadNotice('正在准备 4K 原图...');
+
+    try {
+      // 1. Modern File System Access API: lets user choose destination directory directly!
+      if ('showSaveFilePicker' in window) {
+        try {
+          const handle = await (window as any).showSaveFilePicker({
+            suggestedName: filename,
+            types: [
+              {
+                description: '4K Ultra HD Wallpaper (*.jpg)',
+                accept: { 'image/jpeg': ['.jpg', '.jpeg'] },
+              },
+            ],
+          });
+
+          setDownloadNotice('正在写入所选文件夹...');
+          const res = await fetch(downloadUrl);
+          const blob = await res.blob();
+          const writable = await handle.createWritable();
+          await writable.write(blob);
+          await writable.close();
+
+          setDownloadNotice('✓ 已成功保存到所选文件夹！');
+          setTimeout(() => setDownloadNotice(null), 3500);
+          return;
+        } catch (err: any) {
+          if (err?.name === 'AbortError') {
+            setDownloadNotice(null);
+            return; // User clicked Cancel in picker
+          }
+          // If picker fails, fall through to Blob download
+        }
+      }
+
+      // 2. Cross-browser forced Blob download (avoids opening in new tab)
+      setDownloadNotice('正在下载 4K 原图...');
+      const res = await fetch(downloadUrl);
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+      setDownloadNotice('✓ 已成功触发下载！');
+      setTimeout(() => setDownloadNotice(null), 3500);
+    } catch {
+      // 3. Fallback direct anchor download
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setDownloadNotice('✓ 已触发下载！');
+      setTimeout(() => setDownloadNotice(null), 3500);
+    }
   }, [currentWallpaper]);
 
   // Sound change handler
@@ -590,6 +651,14 @@ export function App() {
           lang={lang}
         />
       </div>
+
+      {/* Floating Download Toast / Notice */}
+      {downloadNotice && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 pointer-events-none flex items-center gap-2 px-4 py-2 rounded-full bg-black/80 backdrop-blur-md border border-white/20 text-xs text-white shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+          <span className="font-medium">{downloadNotice}</span>
+        </div>
+      )}
 
       {/* Category & Adult Mode Settings Modal */}
       <CategorySettingsModal
