@@ -11,6 +11,7 @@ import {
   Search,
   Gauge,
   AlertCircle,
+  FolderSync,
 } from 'lucide-react';
 import { PlayerFilterConfig, CategoryType, QualityMode } from '../types';
 import { PRESET_CATEGORIES, SUGGESTED_TAGS } from '../data/wallpapers';
@@ -23,6 +24,9 @@ interface CategorySettingsModalProps {
   isFetching: boolean;
   poolCount: number;
   detectedWidth: number;
+  savedDirName?: string | null;
+  onPickDirectory?: () => void;
+  onResetDirectory?: () => void;
 }
 
 export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
@@ -33,6 +37,9 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
   isFetching,
   poolCount,
   detectedWidth,
+  savedDirName,
+  onPickDirectory,
+  onResetDirectory,
 }) => {
   const [showKey, setShowKey] = useState(false);
   const [inputKey, setInputKey] = useState(config.passcodeOrKey);
@@ -449,6 +456,65 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
                     </div>
                   </>
                 )}
+              </div>
+            )}
+          </div>
+
+          {/* 5. Wallpaper Download Destination (Local Folder) */}
+          <div className="bg-black/40 p-4 rounded-2xl border border-white/10 space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                <FolderSync className="w-3.5 h-3.5 text-amber-300" />
+                <span>5. 壁纸保存文件夹 (快捷键: 按 D 保存，按 Shift+D 更改)</span>
+              </label>
+              {savedDirName && onResetDirectory && (
+                <button
+                  onClick={onResetDirectory}
+                  className="text-[11px] text-slate-400 hover:text-rose-300 cursor-pointer transition-colors"
+                >
+                  重置为默认
+                </button>
+              )}
+            </div>
+
+            {'showDirectoryPicker' in window ? (
+              <div className="flex items-center justify-between p-3.5 rounded-xl bg-white/5 border border-white/10">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-8 h-8 rounded-lg bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-base shrink-0">
+                    📁
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-white truncate">
+                      {savedDirName ? `当前指定保存目录：「${savedDirName}」` : '尚未绑定专用文件夹'}
+                    </div>
+                    <div className="text-[11px] text-slate-400 truncate">
+                      {savedDirName
+                        ? '按 D 键时壁纸将静默自动存入该文件夹'
+                        : '默认保存至浏览器下载目录，点击右侧可绑定文件夹'}
+                    </div>
+                  </div>
+                </div>
+
+                {onPickDirectory && (
+                  <button
+                    onClick={onPickDirectory}
+                    className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-black text-xs font-bold transition-all cursor-pointer shrink-0 ml-3 shadow-md hover:shadow-lg"
+                  >
+                    {savedDirName ? '更换文件夹' : '选择文件夹'}
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="p-3.5 rounded-xl bg-white/5 border border-white/10 text-xs text-slate-300 leading-relaxed space-y-1">
+                <div className="text-amber-300 font-semibold flex items-center gap-1">
+                  <span>⚠️ 当前浏览器（Safari / Firefox）说明</span>
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  当前浏览器受系统沙盒限制，网页端不支持直接写入特定外部文件夹，按 D 键时将下载至系统默认「下载 (Downloads)」目录。
+                </p>
+                <p className="text-[11px] text-indigo-300 pt-0.5">
+                  💡 若需指定文件夹静默存入，推荐使用 Chrome 浏览器，或使用 Ambient4K 原生 Mac App。
+                </p>
               </div>
             )}
           </div>

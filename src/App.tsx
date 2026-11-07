@@ -506,10 +506,64 @@ export function App() {
     dirName?: string;
   } | null>(null);
 
+  // Explicitly prompt directory picker to select or change download folder
+  const handlePickDirectory = useCallback(async () => {
+    if (!('showDirectoryPicker' in window)) {
+      setDownloadNotice({
+        text: '当前浏览器（Safari/Firefox）受安全限制不支持网页指定本地外部文件夹，按 D 将下载至系统「下载」目录。推荐使用 Chrome 或 Ambient4K 原生 Mac App。',
+      });
+      setTimeout(() => setDownloadNotice(null), 5000);
+      return;
+    }
+
+    try {
+      setDownloadNotice({ text: '请在弹出的系统窗口中选择保存壁纸的文件夹...' });
+      const dirHandle = await (window as any).showDirectoryPicker({
+        mode: 'readwrite',
+        startIn: 'downloads',
+      });
+      if (dirHandle) {
+        savedDirectoryHandleRef.current = dirHandle;
+        setSavedDirName(dirHandle.name);
+        await storeDirectoryHandle(dirHandle);
+        setDownloadNotice({
+          text: `✓ 已成功绑定文件夹「${dirHandle.name}」，后续按 D 键将静默自动存入！`,
+          dirName: dirHandle.name,
+        });
+        setTimeout(() => setDownloadNotice(null), 4500);
+      }
+    } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        setDownloadNotice(null);
+      } else {
+        setDownloadNotice({ text: '选择文件夹未完成或未授权' });
+        setTimeout(() => setDownloadNotice(null), 3000);
+      }
+    }
+  }, []);
+
+  // Reset remembered directory handle
+  const handleResetDirectory = useCallback(async () => {
+    savedDirectoryHandleRef.current = null;
+    setSavedDirName(null);
+    try {
+      const db = await openHandleDB();
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).delete(IDB_KEY);
+    } catch {}
+    setDownloadNotice({ text: '已重置保存目录为系统默认「下载」目录' });
+    setTimeout(() => setDownloadNotice(null), 3000);
+  }, []);
+
   // Save current wallpaper (Prompts once for folder selection, subsequent saves are instant and direct)
   const handleSaveCurrentImage = useCallback(
     async (forcePickNewFolder: boolean = false) => {
       if (!currentWallpaper) return;
+      if (forcePickNewFolder) {
+        await handlePickDirectory();
+        return;
+      }
+
       const downloadUrl = currentWallpaper.rawUrl || currentWallpaper.url;
       const cleanSource = (currentWallpaper.source || 'Wallpaper').replace(/[^a-zA-Z0-9]/g, '');
       const filename = `Ambient4K_${cleanSource}_${currentWallpaper.id}.jpg`;
@@ -519,8 +573,8 @@ export function App() {
         try {
           let dirHandle = savedDirectoryHandleRef.current;
 
-          // If first time or user pressed Shift+D / clicked "更换文件夹", prompt for directory
-          if (forcePickNewFolder || !dirHandle) {
+          // If first time, prompt for directory once
+          if (!dirHandle) {
             setDownloadNotice({ text: '请选择保存壁纸的文件夹（仅需指定一次，后续按 D 键静默存入）...' });
             dirHandle = await (window as any).showDirectoryPicker({
               mode: 'readwrite',
@@ -590,7 +644,7 @@ export function App() {
         setTimeout(() => setDownloadNotice(null), 3500);
       }
     },
-    [currentWallpaper]
+    [currentWallpaper, handlePickDirectory]
   );
 
   // Sound change handler
@@ -654,9 +708,13 @@ export function App() {
         e.preventDefault();
         toggleScaleMode();
         extendIdleTimerIfVisible();
-      } else if (e.code === 'KeyD') {
+      } else if (e.code === 'KeyD' || e.key === 'D' || e.key === 'd') {
         e.preventDefault();
-        handleSaveCurrentImage(e.shiftKey);
+        if (e.shiftKey) {
+          handlePickDirectory();
+        } else {
+          handleSaveCurrentImage(false);
+        }
         extendIdleTimerIfVisible();
       } else if (e.code === 'KeyC') {
         e.preventDefault();
@@ -688,6 +746,7 @@ export function App() {
     filterConfig,
     toggleScaleMode,
     handleSaveCurrentImage,
+    handlePickDirectory,
   ]);
 
   // Download macOS Client trigger
@@ -771,6 +830,7 @@ export function App() {
           scaleMode={scaleMode}
           onToggleScaleMode={toggleScaleMode}
           onSaveCurrentImage={() => handleSaveCurrentImage(false)}
+          onPickDirectory={handlePickDirectory}
           savedDirName={savedDirName}
           onToggleZenMode={handleToggleUi}
           uiVisible={uiVisible || isCategoryModalOpen}
@@ -783,15 +843,21 @@ export function App() {
         <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2.5 px-4 py-2.5 rounded-full bg-black/85 backdrop-blur-md border border-white/20 text-xs text-white shadow-2xl animate-in fade-in zoom-in-95 duration-200">
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
           <span className="font-medium">{downloadNotice.text}</span>
-          {downloadNotice.dirName && (
+          {'showDirectoryPicker' in window && (
             <button
-              onClick={() => handleSaveCurrentImage(true)}
+              onClick={handlePickDirectory}
               className="ml-2 text-amber-300 hover:text-amber-200 underline cursor-pointer font-medium shrink-0"
               title="重新选择壁纸保存文件夹 (快捷键: Shift+D)"
             >
-              更换文件夹
+              {downloadNotice.dirName ? '更换文件夹' : '选择保存文件夹'}
             </button>
           )}
+          <button
+            onClick={() => setDownloadNotice(null)}
+            className="ml-1 text-slate-400 hover:text-white p-0.5 rounded cursor-pointer"
+          >
+            ✕
+          </button>
         </div>
       )}
 
@@ -804,6 +870,9 @@ export function App() {
         isFetching={isFetchingPool}
         poolCount={wallpaperPool.length}
         detectedWidth={detectedWidth}
+        savedDirName={savedDirName}
+        onPickDirectory={handlePickDirectory}
+        onResetDirectory={handleResetDirectory}
       />
 
       {/* MODE 2: CLIENT SHOWCASE & DOWNLOAD HUB */}

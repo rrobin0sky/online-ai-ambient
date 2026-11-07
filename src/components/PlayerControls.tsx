@@ -17,6 +17,7 @@ import {
   Frame,
   ImageDown,
   EyeOff,
+  FolderSync,
 } from 'lucide-react';
 import { SoundType, PlayerFilterConfig } from '../types';
 import { PRESET_CATEGORIES } from '../data/wallpapers';
@@ -41,6 +42,7 @@ interface PlayerControlsProps {
   scaleMode: ScaleMode;
   onToggleScaleMode: () => void;
   onSaveCurrentImage: () => void;
+  onPickDirectory?: () => void;
   savedDirName?: string | null;
   onToggleZenMode?: () => void;
   uiVisible: boolean;
@@ -78,6 +80,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   scaleMode,
   onToggleScaleMode,
   onSaveCurrentImage,
+  onPickDirectory,
   savedDirName,
   onToggleZenMode,
   uiVisible,
@@ -251,22 +254,37 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
 
         <div className="h-4 w-[1px] bg-white/10 shrink-0" />
 
-        {/* Save Current Wallpaper Image */}
-        <button
-          onClick={onSaveCurrentImage}
-          className="p-2 rounded-full text-slate-300 hover:text-white hover:bg-white/10 transition-colors cursor-pointer shrink-0"
-          title={
-            isZh
-              ? savedDirName
-                ? `下载保存至「${savedDirName}」(快捷键: D, 换目录: Shift+D)`
-                : '下载保存当前 4K 原图 (快捷键: D)'
-              : savedDirName
-              ? `Save to "${savedDirName}" (Key: D, Switch: Shift+D)`
-              : 'Download current 4K wallpaper (Key: D)'
-          }
-        >
-          <ImageDown className="w-4 h-4" />
-        </button>
+        {/* Save Current Wallpaper Image & Directory Switcher */}
+        <div className="flex items-center gap-1 shrink-0">
+          <button
+            onClick={onSaveCurrentImage}
+            className="p-2 rounded-full text-slate-300 hover:text-white hover:bg-white/10 transition-colors cursor-pointer shrink-0"
+            title={
+              isZh
+                ? savedDirName
+                  ? `下载 4K 原图至「${savedDirName}」(快捷键: D)`
+                  : '下载保存当前 4K 原图 (快捷键: D)'
+                : savedDirName
+                ? `Save 4K to "${savedDirName}" (Key: D)`
+                : 'Download current 4K wallpaper (Key: D)'
+            }
+          >
+            <ImageDown className="w-4 h-4" />
+          </button>
+
+          {onPickDirectory && (
+            <button
+              onClick={onPickDirectory}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-white/10 hover:bg-white/20 text-slate-200 hover:text-white border border-white/10 transition-colors cursor-pointer shrink-0"
+              title={isZh ? "选择或更换保存壁纸的文件夹 (快捷键: Shift+D)" : "Change Save Folder (Shift+D)"}
+            >
+              <FolderSync className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+              <span className="max-w-[100px] truncate">
+                {savedDirName ? savedDirName : (isZh ? '更换文件夹' : 'Folder')}
+              </span>
+            </button>
+          )}
+        </div>
 
         {/* Zen Mode Toggle */}
         {onToggleZenMode && (
