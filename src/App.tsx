@@ -8,7 +8,6 @@ import { CategorySettingsModal } from './components/CategorySettingsModal';
 import { WallpaperStage, ScaleMode } from './components/WallpaperStage';
 import { soundManager } from './services/soundSynthesizer';
 import { SoundType, PlayerFilterConfig, WallpaperItem, QualityMode } from './types';
-import { isSubframe, openInTopLevel } from './utils/browser';
 
 const STORAGE_KEY = 'ambient4k_web_filter_v2';
 
@@ -39,53 +38,6 @@ function loadSavedConfig(): PlayerFilterConfig {
     return parsed;
   } catch {
     return DEFAULT_FILTER_CONFIG;
-  }
-}
-
-// IndexedDB Directory Handle Persistence (Remembers user's chosen wallpaper folder across saves)
-const IDB_NAME = 'Ambient4K_FS_DB';
-const IDB_STORE = 'fs_handles';
-const IDB_KEY = 'saved_directory';
-
-function openHandleDB(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    if (!('indexedDB' in window)) return reject(new Error('IndexedDB not supported'));
-    const req = indexedDB.open(IDB_NAME, 1);
-    req.onupgradeneeded = () => {
-      req.result.createObjectStore(IDB_STORE);
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-async function getStoredDirectoryHandle(): Promise<FileSystemDirectoryHandle | null> {
-  try {
-    const db = await openHandleDB();
-    return new Promise((resolve) => {
-      const tx = db.transaction(IDB_STORE, 'readonly');
-      const store = tx.objectStore(IDB_STORE);
-      const req = store.get(IDB_KEY);
-      req.onsuccess = () => resolve(req.result || null);
-      req.onerror = () => resolve(null);
-    });
-  } catch {
-    return null;
-  }
-}
-
-async function storeDirectoryHandle(handle: FileSystemDirectoryHandle): Promise<void> {
-  try {
-    const db = await openHandleDB();
-    await new Promise((resolve, reject) => {
-      const tx = db.transaction(IDB_STORE, 'readwrite');
-      const store = tx.objectStore(IDB_STORE);
-      const req = store.put(handle, IDB_KEY);
-      req.onsuccess = () => resolve(undefined);
-      req.onerror = () => reject(req.error);
-    });
-  } catch {
-    // Ignore storage errors
   }
 }
 
@@ -243,19 +195,6 @@ export function App() {
 
   const cloudPageRef = useRef<number>(1);
   const seedRef = useRef<string>(Math.random().toString(36).substring(2, 8));
-
-  const savedDirectoryHandleRef = useRef<any>(null);
-  const [savedDirName, setSavedDirName] = useState<string | null>(null);
-
-  // Load remembered directory handle on initial mount
-  useEffect(() => {
-    getStoredDirectoryHandle().then((handle) => {
-      if (handle) {
-        savedDirectoryHandleRef.current = handle;
-        setSavedDirName(handle.name);
-      }
-    });
-  }, []);
 
   const currentWallpaper = wallpaperPool[currentIndex] || CURATED_WALLPAPERS[0];
 
@@ -502,233 +441,32 @@ export function App() {
     });
   }, []);
 
-  const [downloadNotice, setDownloadNotice] = useState<{
-    text: string;
-    dirName?: string;
-  } | null>(null);
-
-  // Explicitly prompt directory picker to select or change download folder
-  const handlePickDirectory = useCallback(async (): Promise<boolean> => {
-    if (isSubframe()) {
-      setDownloadNotice({
-        text: '当前处于内嵌预览框架中，浏览器禁止调起文件夹选择器。请点击右侧在新标签页打开独立使用。',
-      });
-      setTimeout(() => setDownloadNotice(null), 6000);
-      return false;
-    }
-
-    if (!('showDirectoryPicker' in window)) {
-      setDownloadNotice({
-        text: '当前浏览器（Safari/Firefox）受安全限制不支持网页指定本地外部文件夹，按 D 将下载至系统「下载」目录。推荐使用 Chrome 或 Ambient4K 原生 Mac App。',
-      });
-      setTimeout(() => setDownloadNotice(null), 5000);
-      return false;
-    }
-
+  // Save current 4K wallpaper image (Direct safe download)
+  const handleSaveCurrentImage = useCallback(async () => {
+    if (!currentWallpaper) return;
+    const downloadUrl = currentWallpaper.rawUrl || currentWallpaper.url;
+    const cleanSource = (currentWallpaper.source || 'Wallpaper').replace(/[^a-zA-Z0-9]/g, '');
+    const filename = `Ambient4K_${cleanSource}_${currentWallpaper.id}.jpg`;
     try {
-      setDownloadNotice({ text: '请在弹出的系统窗口中选择保存壁纸的文件夹...' });
-      
-      let dirHandle: any = null;
-      // 1. Try standard showDirectoryPicker without startIn restrictions (which trigger SecurityError in Chromium)
-      try {
-        dirHandle = await (window as any).showDirectoryPicker({
-          id: 'ambient4k_save_dir',
-          mode: 'readwrite',
-        });
-      } catch (optErr: any) {
-        if (optErr?.name === 'AbortError') {
-          console.log('[DirectoryPicker] User closed or aborted picker dialog.');
-          setDownloadNotice({ text: '已取消选择文件夹' });
-          setTimeout(() => setDownloadNotice(null), 2500);
-          return false;
-        }
-        console.warn('[DirectoryPicker] showDirectoryPicker with options failed, retrying bare call:', optErr);
-        // Fallback: call bare showDirectoryPicker() without arguments
-        try {
-          dirHandle = await (window as any).showDirectoryPicker();
-        } catch (bareErr: any) {
-          if (bareErr?.name === 'AbortError') {
-            console.log('[DirectoryPicker] User closed or aborted bare picker dialog.');
-            setDownloadNotice({ text: '已取消选择文件夹' });
-            setTimeout(() => setDownloadNotice(null), 2500);
-            return false;
-          }
-          throw bareErr;
-        }
-      }
-
-      if (dirHandle) {
-        // Ensure readwrite permission
-        try {
-          let perm = 'granted';
-          if (typeof dirHandle.queryPermission === 'function') {
-            perm = await dirHandle.queryPermission({ mode: 'readwrite' });
-          }
-          if (perm !== 'granted' && typeof dirHandle.requestPermission === 'function') {
-            perm = await dirHandle.requestPermission({ mode: 'readwrite' });
-          }
-          if (perm !== 'granted') {
-            console.warn('[DirectoryPicker] Write permission was not granted by user.');
-          }
-        } catch (permErr) {
-          console.warn('[DirectoryPicker] Permission query/request error:', permErr);
-        }
-
-        savedDirectoryHandleRef.current = dirHandle;
-        setSavedDirName(dirHandle.name);
-        await storeDirectoryHandle(dirHandle);
-        setDownloadNotice({
-          text: `✓ 已成功绑定文件夹「${dirHandle.name}」，后续按 D 键将静默自动存入！`,
-          dirName: dirHandle.name,
-        });
-        setTimeout(() => setDownloadNotice(null), 4500);
-        return true;
-      }
-      return false;
-    } catch (err: any) {
-      console.error('[DirectoryPicker] Error selecting directory:', err);
-      if (err?.name === 'AbortError') {
-        setDownloadNotice({ text: '已取消选择文件夹' });
-      } else if (err?.message?.includes('Cross origin sub frames') || err?.message?.includes('sub frames')) {
-        setDownloadNotice({
-          text: '当前处于内嵌预览框架中，受浏览器安全限制无法唤起文件夹。请在新窗口独立打开使用。',
-        });
-      } else {
-        setDownloadNotice({ text: `选择文件夹失败: ${err?.message || '请确认浏览器权限'}` });
-      }
-      setTimeout(() => setDownloadNotice(null), 4500);
-      return false;
+      const blob = await fetchSafeBlob(downloadUrl);
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+    } catch {
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.target = '_blank';
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
     }
-  }, []);
-
-  // Reset remembered directory handle
-  const handleResetDirectory = useCallback(async () => {
-    savedDirectoryHandleRef.current = null;
-    setSavedDirName(null);
-    try {
-      const db = await openHandleDB();
-      const tx = db.transaction(IDB_STORE, 'readwrite');
-      tx.objectStore(IDB_STORE).delete(IDB_KEY);
-    } catch {}
-    setDownloadNotice({ text: '已重置保存目录为系统默认「下载」目录' });
-    setTimeout(() => setDownloadNotice(null), 3000);
-  }, []);
-
-  // Save current wallpaper (Prompts once for folder selection, subsequent saves are instant and direct)
-  const handleSaveCurrentImage = useCallback(
-    async (forcePickNewFolder: boolean = false) => {
-      if (!currentWallpaper) return;
-      if (forcePickNewFolder) {
-        await handlePickDirectory();
-        return;
-      }
-
-      const downloadUrl = currentWallpaper.rawUrl || currentWallpaper.url;
-      const cleanSource = (currentWallpaper.source || 'Wallpaper').replace(/[^a-zA-Z0-9]/g, '');
-      const filename = `Ambient4K_${cleanSource}_${currentWallpaper.id}.jpg`;
-
-      // 1. Modern File System Access API: Directory Picker (Chrome / Edge / Opera)
-      // Note: Skip Directory Picker if running inside subframe, as cross-origin frames cannot show directory picker
-      if ('showDirectoryPicker' in window && !isSubframe()) {
-        try {
-          let dirHandle = savedDirectoryHandleRef.current;
-
-          // If first time, prompt for directory once
-          if (!dirHandle) {
-            setDownloadNotice({ text: '请选择保存壁纸的文件夹（仅需指定一次，后续按 D 键静默存入）...' });
-            try {
-              dirHandle = await (window as any).showDirectoryPicker({
-                id: 'ambient4k_save_dir',
-                mode: 'readwrite',
-              });
-            } catch (optErr: any) {
-              if (optErr?.name === 'AbortError') {
-                setDownloadNotice(null);
-                return;
-              }
-              try {
-                dirHandle = await (window as any).showDirectoryPicker();
-              } catch (bareErr: any) {
-                if (bareErr?.name === 'AbortError') {
-                  setDownloadNotice(null);
-                  return;
-                }
-                throw bareErr;
-              }
-            }
-            if (dirHandle) {
-              try {
-                if (typeof dirHandle.requestPermission === 'function') {
-                  await dirHandle.requestPermission({ mode: 'readwrite' });
-                }
-              } catch {}
-              savedDirectoryHandleRef.current = dirHandle;
-              setSavedDirName(dirHandle.name);
-              await storeDirectoryHandle(dirHandle);
-            }
-          } else {
-            // Verify permission without repeatedly popping up the picker if denied
-            let perm = 'denied';
-            try {
-              perm = await dirHandle.queryPermission({ mode: 'readwrite' });
-              if (perm !== 'granted') {
-                perm = await dirHandle.requestPermission({ mode: 'readwrite' });
-              }
-            } catch {
-              // Ignore gesture requirement errors
-            }
-            if (perm !== 'granted') {
-              throw new Error('Directory permission not granted, falling back to direct download');
-            }
-          }
-
-          setDownloadNotice({ text: `正在保存到「${dirHandle.name}」...` });
-          const blob = await fetchSafeBlob(downloadUrl);
-          const fileHandle = await dirHandle.getFileHandle(filename, { create: true });
-          const writable = await fileHandle.createWritable();
-          await writable.write(blob);
-          await writable.close();
-
-          setDownloadNotice({
-            text: `✓ 已保存至文件夹「${dirHandle.name}」`,
-            dirName: dirHandle.name,
-          });
-          setTimeout(() => setDownloadNotice(null), 4000);
-          return;
-        } catch (err: any) {
-          if (err?.name === 'AbortError') {
-            setDownloadNotice(null);
-            return; // User cancelled picker
-          }
-          // If filesystem access encounters issues, fall through to safe blob download
-        }
-      }
-
-      // 2. Cross-browser fallback: direct safe Blob download (NEVER navigates current tab away!)
-      try {
-        setDownloadNotice({ text: '正在下载 4K 原图...' });
-        const blob = await fetchSafeBlob(downloadUrl);
-        const blobUrl = URL.createObjectURL(blob);
-
-        const link = document.createElement('a');
-        link.href = blobUrl;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-
-        setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
-        setDownloadNotice({ text: '✓ 已成功保存到下载目录！' });
-        setTimeout(() => setDownloadNotice(null), 3500);
-      } catch (dlErr: any) {
-        // Last-resort fallback: open in a NEW window/tab so current ambient player is never lost
-        window.open(downloadUrl, '_blank');
-        setDownloadNotice({ text: '✓ 已在新窗口打开原图下载！' });
-        setTimeout(() => setDownloadNotice(null), 3500);
-      }
-    },
-    [currentWallpaper, handlePickDirectory]
-  );
+  }, [currentWallpaper]);
 
   // Sound change handler
   const handleSoundChange = (sound: SoundType) => {
@@ -793,11 +531,7 @@ export function App() {
         extendIdleTimerIfVisible();
       } else if (e.code === 'KeyD' || e.key === 'D' || e.key === 'd') {
         e.preventDefault();
-        if (e.shiftKey) {
-          handlePickDirectory();
-        } else {
-          handleSaveCurrentImage(false);
-        }
+        handleSaveCurrentImage();
         extendIdleTimerIfVisible();
       } else if (e.code === 'KeyC') {
         e.preventDefault();
@@ -829,7 +563,6 @@ export function App() {
     filterConfig,
     toggleScaleMode,
     handleSaveCurrentImage,
-    handlePickDirectory,
   ]);
 
   // Download macOS Client trigger
@@ -912,46 +645,12 @@ export function App() {
           isFetchingPool={isFetchingPool}
           scaleMode={scaleMode}
           onToggleScaleMode={toggleScaleMode}
-          onSaveCurrentImage={() => handleSaveCurrentImage(false)}
-          onPickDirectory={handlePickDirectory}
-          savedDirName={savedDirName}
+          onSaveCurrentImage={handleSaveCurrentImage}
           onToggleZenMode={handleToggleUi}
           uiVisible={uiVisible || isCategoryModalOpen}
           lang={lang}
         />
       </div>
-
-      {/* Floating Download Toast / Notice */}
-      {downloadNotice && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-2.5 px-4 py-2.5 rounded-full bg-black/90 backdrop-blur-md border border-white/20 text-xs text-white shadow-2xl animate-in fade-in zoom-in-95 duration-200 max-w-[92vw]">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
-          <span className="font-medium truncate">{downloadNotice.text}</span>
-          {isSubframe() ? (
-            <button
-              onClick={openInTopLevel}
-              className="ml-2 px-3 py-1 rounded-full bg-amber-500 hover:bg-amber-400 text-black font-bold shrink-0 cursor-pointer text-[11px] transition-colors"
-            >
-              在新窗口打开 ↗
-            </button>
-          ) : (
-            'showDirectoryPicker' in window && (
-              <button
-                onClick={handlePickDirectory}
-                className="ml-2 text-amber-300 hover:text-amber-200 underline cursor-pointer font-medium shrink-0"
-                title="重新选择壁纸保存文件夹 (快捷键: Shift+D)"
-              >
-                {downloadNotice.dirName ? '更换文件夹' : '选择保存文件夹'}
-              </button>
-            )
-          )}
-          <button
-            onClick={() => setDownloadNotice(null)}
-            className="ml-1 text-slate-400 hover:text-white p-0.5 rounded cursor-pointer shrink-0"
-          >
-            ✕
-          </button>
-        </div>
-      )}
 
       {/* Category & Adult Mode Settings Modal */}
       <CategorySettingsModal
@@ -962,9 +661,6 @@ export function App() {
         isFetching={isFetchingPool}
         poolCount={wallpaperPool.length}
         detectedWidth={detectedWidth}
-        savedDirName={savedDirName}
-        onPickDirectory={handlePickDirectory}
-        onResetDirectory={handleResetDirectory}
       />
 
       {/* MODE 2: CLIENT SHOWCASE & DOWNLOAD HUB */}

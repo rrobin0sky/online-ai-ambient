@@ -11,12 +11,9 @@ import {
   Search,
   Gauge,
   AlertCircle,
-  FolderSync,
-  ExternalLink,
 } from 'lucide-react';
 import { PlayerFilterConfig, CategoryType, QualityMode } from '../types';
 import { PRESET_CATEGORIES, SUGGESTED_TAGS } from '../data/wallpapers';
-import { isSubframe, openInTopLevel } from '../utils/browser';
 
 interface CategorySettingsModalProps {
   isOpen: boolean;
@@ -26,9 +23,6 @@ interface CategorySettingsModalProps {
   isFetching: boolean;
   poolCount: number;
   detectedWidth: number;
-  savedDirName?: string | null;
-  onPickDirectory?: () => Promise<boolean> | void;
-  onResetDirectory?: () => void;
 }
 
 export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
@@ -39,34 +33,10 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
   isFetching,
   poolCount,
   detectedWidth,
-  savedDirName,
-  onPickDirectory,
-  onResetDirectory,
 }) => {
   const [showKey, setShowKey] = useState(false);
   const [inputKey, setInputKey] = useState(config.passcodeOrKey);
   const [errorTip, setErrorTip] = useState('');
-  const [isPickingDir, setIsPickingDir] = useState(false);
-  const [pickFeedback, setPickFeedback] = useState<string | null>(null);
-
-  const handlePickClick = async () => {
-    if (!onPickDirectory || isPickingDir) return;
-    setIsPickingDir(true);
-    setPickFeedback('正在打开系统文件夹选择窗口...');
-    try {
-      const res = await onPickDirectory();
-      if (res) {
-        setPickFeedback('✓ 文件夹绑定成功！');
-      } else {
-        setPickFeedback(null);
-      }
-    } catch (err: any) {
-      setPickFeedback(`选择异常: ${err?.message || '请重试'}`);
-    } finally {
-      setIsPickingDir(false);
-      setTimeout(() => setPickFeedback(null), 3500);
-    }
-  };
 
   // Sync internal state when config changes
   useEffect(() => {
@@ -479,119 +449,6 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
                     </div>
                   </>
                 )}
-              </div>
-            )}
-          </div>
-
-          {/* 5. Wallpaper Download Destination (Local Folder) */}
-          <div className="bg-black/40 p-4 rounded-2xl border border-white/10 space-y-3">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-                <FolderSync className="w-3.5 h-3.5 text-amber-300" />
-                <span>5. 壁纸保存文件夹 (快捷键: 按 D 保存，按 Shift+D 更改)</span>
-              </label>
-              {savedDirName && onResetDirectory && (
-                <button
-                  onClick={onResetDirectory}
-                  className="text-[11px] text-slate-400 hover:text-rose-300 cursor-pointer transition-colors"
-                >
-                  重置为默认
-                </button>
-              )}
-            </div>
-
-            {isSubframe() ? (
-              <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-xs text-slate-200 leading-relaxed space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <div className="text-amber-300 font-bold flex items-center gap-1.5">
-                    <span className="text-sm">⚠️</span>
-                    <span>当前处于内嵌预览框架 (Subframe / iframe)</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={openInTopLevel}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-black text-xs font-bold transition-all cursor-pointer shadow hover:shadow-md shrink-0 ml-2"
-                  >
-                    <span>在新标签页独立打开</span>
-                    <ExternalLink className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-                <p className="text-[11px] text-slate-300 leading-normal">
-                  浏览器安全策略（Chromium 核心保护）严格禁止在跨域内嵌子框架中直接调起系统本地文件夹选择窗口。
-                </p>
-                <div className="p-2.5 rounded-xl bg-black/30 border border-white/10 text-[11px] space-y-1">
-                  <div className="text-emerald-400 font-semibold flex items-center gap-1">
-                    <span>💡 两种使用方式：</span>
-                  </div>
-                  <p className="text-slate-300">
-                    1. <strong>在新标签页独立打开</strong>：直接以顶层窗口运行，无安全限制，可自由指定 iCloud / 本地专用文件夹静默存入；
-                  </p>
-                  <p className="text-slate-300">
-                    2. <strong>在当前窗口继续浏览</strong>：直接按键盘 <kbd className="px-1.5 py-0.5 rounded bg-white/20 font-mono text-[10px] text-white">D</kbd> 键，依然会自动安全下载 4K 壁纸原图至系统的「下载」文件夹。
-                  </p>
-                </div>
-              </div>
-            ) : 'showDirectoryPicker' in window ? (
-              <div className="flex items-center justify-between p-3.5 rounded-xl bg-white/5 border border-white/10">
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="w-8 h-8 rounded-lg bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-base shrink-0">
-                    📁
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-xs font-bold text-white truncate flex items-center gap-1.5">
-                      {savedDirName ? (
-                        <>
-                          <span>当前保存目录：</span>
-                          <span className="text-amber-300 font-mono bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
-                            {savedDirName}
-                          </span>
-                        </>
-                      ) : (
-                        '尚未绑定专用文件夹'
-                      )}
-                    </div>
-                    <div className="text-[11px] text-slate-400 truncate mt-0.5">
-                      {savedDirName
-                        ? '按 D 键时壁纸将静默自动存入该文件夹'
-                        : '默认保存至浏览器下载目录，点击右侧可选择专用文件夹'}
-                    </div>
-                    {pickFeedback && (
-                      <div className="text-[11px] text-amber-300 font-medium animate-pulse mt-1">
-                        {pickFeedback}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {onPickDirectory && (
-                  <button
-                    type="button"
-                    onClick={handlePickClick}
-                    disabled={isPickingDir}
-                    className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-60 text-black text-xs font-bold transition-all cursor-pointer shrink-0 ml-3 shadow-md hover:shadow-lg flex items-center gap-1.5"
-                  >
-                    {isPickingDir ? (
-                      <>
-                        <span className="w-3 h-3 border-2 border-black border-t-transparent rounded-full animate-spin" />
-                        <span>打开中...</span>
-                      </>
-                    ) : (
-                      savedDirName ? '更换文件夹' : '选择文件夹'
-                    )}
-                  </button>
-                )}
-              </div>
-            ) : (
-              <div className="p-3.5 rounded-xl bg-white/5 border border-white/10 text-xs text-slate-300 leading-relaxed space-y-1">
-                <div className="text-amber-300 font-semibold flex items-center gap-1">
-                  <span>⚠️ 当前浏览器（Safari / Firefox）说明</span>
-                </div>
-                <p className="text-[11px] text-slate-400">
-                  当前浏览器受系统沙盒限制，网页端不支持直接写入特定外部文件夹，按 D 键时将下载至系统默认「下载 (Downloads)」目录。
-                </p>
-                <p className="text-[11px] text-indigo-300 pt-0.5">
-                  💡 若需指定文件夹静默存入，推荐使用 Chrome 浏览器，或使用 Ambient4K 原生 Mac App。
-                </p>
               </div>
             )}
           </div>
