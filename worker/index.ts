@@ -71,9 +71,11 @@ async function fetchWallhaven(params: {
   apiKey: string;
   origin: string;
   targetWidth: number;
+  page: number;
+  seed?: string;
 }): Promise<UnifiedWallpaper[]> {
   try {
-    const { category, customQuery, adultMode, purityMode, apiKey, origin, targetWidth } = params;
+    const { category, customQuery, adultMode, purityMode, apiKey, origin, targetWidth, page, seed } = params;
     const preset = CATEGORY_QUERY_MAP[category] || CATEGORY_QUERY_MAP.all;
     const queryStr = category === 'custom' && customQuery.trim() ? customQuery.trim() : preset.q;
 
@@ -95,7 +97,8 @@ async function fetchWallhaven(params: {
     searchUrl.searchParams.set('purity', purity);
     searchUrl.searchParams.set('atleast', '1920x1080');
     searchUrl.searchParams.set('sorting', 'random');
-    searchUrl.searchParams.set('seed', randomSeed());
+    searchUrl.searchParams.set('seed', seed && seed.trim() ? seed.trim() : randomSeed());
+    searchUrl.searchParams.set('page', String(Math.max(1, page)));
 
     if (queryStr) {
       if (adultMode && purity === '001' && (category === 'beauty' || category === 'anime' || category === 'all')) {
@@ -110,7 +113,7 @@ async function fetchWallhaven(params: {
 
     const res = await fetch(searchUrl.toString(), {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
         ...(apiKey && adultMode ? { 'X-API-Key': apiKey } : {}),
       },
     });
@@ -121,7 +124,7 @@ async function fetchWallhaven(params: {
 
     return json.data
       .filter((item: any) => !item.file_size || item.file_size < 16 * 1024 * 1024)
-      .slice(0, 15)
+      .slice(0, 18)
       .map((item: any) => {
         const rawUrl = item.path;
         const rawThumb = item.thumbs?.large || item.thumbs?.original || item.thumbs?.small || item.path;
@@ -154,31 +157,38 @@ async function fetchYande(params: {
   purityMode: string;
   origin: string;
   targetWidth: number;
+  page: number;
 }): Promise<UnifiedWallpaper[]> {
   try {
-    const { category, customQuery, adultMode, purityMode, origin, targetWidth } = params;
+    const { category, customQuery, adultMode, purityMode, origin, targetWidth, page } = params;
     if (category !== 'anime' && category !== 'all' && category !== 'custom' && !adultMode) {
       return [];
     }
 
-    const tags: string[] = ['order:random', 'width:>=1920'];
+    const tags: string[] = [];
     if (!adultMode) {
       tags.push('rating:s');
     } else if (purityMode === '001') {
-      tags.push('-rating:s');
+      tags.push('rating:e');
+    } else if (purityMode === '110') {
+      tags.push('rating:q');
     }
 
     if (category === 'custom' && customQuery.trim()) {
       tags.push(customQuery.trim().replace(/\s+/g, '_').toLowerCase());
     }
 
+    const targetPage = Math.max(1, page);
     const url = new URL('https://yande.re/post.json');
-    url.searchParams.set('limit', '12');
-    url.searchParams.set('tags', tags.join(' '));
+    url.searchParams.set('limit', '18');
+    url.searchParams.set('page', String(targetPage));
+    if (tags.length > 0) {
+      url.searchParams.set('tags', tags.join(' '));
+    }
 
     const res = await fetch(url.toString(), {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
       },
     });
     if (!res.ok) return [];
@@ -187,7 +197,7 @@ async function fetchYande(params: {
 
     return posts
       .filter((p) => p && (p.sample_url || p.jpeg_url || p.file_url))
-      .slice(0, 8)
+      .slice(0, 14)
       .map((p) => {
         const rawStreamSource = p.sample_url || p.jpeg_url || p.file_url;
         const rawOriginal = p.file_url || rawStreamSource;
@@ -219,28 +229,35 @@ async function fetchKonachan(params: {
   purityMode: string;
   origin: string;
   targetWidth: number;
+  page: number;
 }): Promise<UnifiedWallpaper[]> {
   try {
-    const { category, adultMode, purityMode, origin, targetWidth } = params;
+    const { category, adultMode, purityMode, origin, targetWidth, page } = params;
     if (category !== 'anime' && category !== 'all' && !adultMode) {
       return [];
     }
 
     const domain = adultMode ? 'https://konachan.com/post.json' : 'https://konachan.net/post.json';
-    const tags: string[] = ['order:random', 'width:>=1920'];
+    const tags: string[] = [];
     if (!adultMode) {
       tags.push('rating:s');
     } else if (purityMode === '001') {
-      tags.push('-rating:s');
+      tags.push('rating:e');
+    } else if (purityMode === '110') {
+      tags.push('rating:q');
     }
 
+    const targetPage = Math.max(1, page);
     const url = new URL(domain);
-    url.searchParams.set('limit', '8');
-    url.searchParams.set('tags', tags.join(' '));
+    url.searchParams.set('limit', '14');
+    url.searchParams.set('page', String(targetPage));
+    if (tags.length > 0) {
+      url.searchParams.set('tags', tags.join(' '));
+    }
 
     const res = await fetch(url.toString(), {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
       },
     });
     if (!res.ok) return [];
@@ -249,7 +266,7 @@ async function fetchKonachan(params: {
 
     return posts
       .filter((p) => p && (p.sample_url || p.jpeg_url || p.file_url))
-      .slice(0, 6)
+      .slice(0, 10)
       .map((p) => {
         const rawStreamSource = p.sample_url || p.jpeg_url || p.file_url;
         const rawOriginal = p.file_url || rawStreamSource;
@@ -258,7 +275,7 @@ async function fetchKonachan(params: {
         const h = Number(p.height) || 1440;
 
         return {
-          id: `kn_${p.id}`,
+          id: `kc_${p.id}`,
           title: `Konachan · #${p.id}`,
           category: 'anime',
           url: buildStreamProxyUrl(origin, rawStreamSource, targetWidth, 82),
@@ -292,6 +309,8 @@ export default {
       const enableYande = url.searchParams.get('yande') !== '0';
       const enableKonachan = url.searchParams.get('konachan') !== '0';
       const targetWidth = Number(url.searchParams.get('w') ?? '2560');
+      const page = Number(url.searchParams.get('page') || '1');
+      const seed = url.searchParams.get('seed') || '';
 
       let effectiveApiKey = '';
       let isAuthorized = false;
@@ -318,6 +337,8 @@ export default {
           apiKey: effectiveApiKey,
           origin,
           targetWidth,
+          page,
+          seed,
         }),
       ];
 
@@ -330,6 +351,7 @@ export default {
             purityMode,
             origin,
             targetWidth,
+            page,
           })
         );
       }
@@ -342,6 +364,7 @@ export default {
             purityMode,
             origin,
             targetWidth,
+            page,
           })
         );
       }
@@ -357,7 +380,7 @@ export default {
       return new Response(
         JSON.stringify({
           ok: true,
-          unlockedVip: unlockedByPasscode,
+          unlockedVip: isAuthorized,
           targetWidth,
           count: merged.length,
           data: merged,

@@ -41,6 +41,53 @@ function loadSavedConfig(): PlayerFilterConfig {
   }
 }
 
+// IndexedDB Directory Handle Persistence (Remembers user's chosen wallpaper folder across saves)
+const IDB_NAME = 'Ambient4K_FS_DB';
+const IDB_STORE = 'fs_handles';
+const IDB_KEY = 'saved_directory';
+
+function openHandleDB(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    if (!('indexedDB' in window)) return reject(new Error('IndexedDB not supported'));
+    const req = indexedDB.open(IDB_NAME, 1);
+    req.onupgradeneeded = () => {
+      req.result.createObjectStore(IDB_STORE);
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function getStoredDirectoryHandle(): Promise<FileSystemDirectoryHandle | null> {
+  try {
+    const db = await openHandleDB();
+    return new Promise((resolve) => {
+      const tx = db.transaction(IDB_STORE, 'readonly');
+      const store = tx.objectStore(IDB_STORE);
+      const req = store.get(IDB_KEY);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => resolve(null);
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function storeDirectoryHandle(handle: FileSystemDirectoryHandle): Promise<void> {
+  try {
+    const db = await openHandleDB();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      const store = tx.objectStore(IDB_STORE);
+      const req = store.put(handle, IDB_KEY);
+      req.onsuccess = () => resolve(undefined);
+      req.onerror = () => reject(req.error);
+    });
+  } catch {
+    // Ignore storage errors
+  }
+}
+
 function getOptimalStreamWidth(mode: QualityMode = 'auto'): number {
   if (mode === 'raw') return 0; // 0 = uncompressed original
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -173,6 +220,22 @@ export function App() {
   const autoPlayTimerRef = useRef<NodeJS.Timeout | null>(null);
   const isRefillingRef = useRef<boolean>(false);
 
+  const cloudPageRef = useRef<number>(1);
+  const seedRef = useRef<string>(Math.random().toString(36).substring(2, 8));
+
+  const savedDirectoryHandleRef = useRef<any>(null);
+  const [savedDirName, setSavedDirName] = useState<string | null>(null);
+
+  // Load remembered directory handle on initial mount
+  useEffect(() => {
+    getStoredDirectoryHandle().then((handle) => {
+      if (handle) {
+        savedDirectoryHandleRef.current = handle;
+        setSavedDirName(handle.name);
+      }
+    });
+  }, []);
+
   const currentWallpaper = wallpaperPool[currentIndex] || CURATED_WALLPAPERS[0];
 
   // Build sliding-window preload list (next 3 items in queue)
@@ -186,11 +249,15 @@ export function App() {
     return list;
   }, [wallpaperPool, currentIndex]);
 
-  // Fetch remote wallpapers via Cloudflare Worker API with screen-adaptive width
+  // Fetch remote wallpapers via Cloudflare Worker API with screen-adaptive width & endless pagination
   const fetchCloudWallpapers = useCallback(
     async (cfg: PlayerFilterConfig, appendMode: boolean = false) => {
       if (!appendMode) {
         setIsFetchingPool(true);
+        cloudPageRef.current = 1;
+        seedRef.current = Math.random().toString(36).substring(2, 8);
+      } else {
+        cloudPageRef.current += 1;
       }
 
       const streamW = getOptimalStreamWidth(cfg.qualityMode || 'auto');
@@ -218,6 +285,8 @@ export function App() {
           yande: cfg.enableYande ? '1' : '0',
           konachan: cfg.enableKonachan ? '1' : '0',
           w: String(streamW),
+          page: String(cloudPageRef.current),
+          seed: seedRef.current,
         });
 
         const res = await fetch(`/api/wallpapers?${params.toString()}`);
@@ -233,12 +302,22 @@ export function App() {
                 return freshItems.length > 0 ? [...prev, ...freshItems] : prev;
               });
             } else {
-              const combined =
-                effectiveAdult && cfg.purityMode === '001'
-                  ? json.data
-                  : [...json.data, ...localFiltered];
-              setWallpaperPool(combined);
+              // In adult mode, strictly use returned adult online items without local SFW filler
+              const initialPool = effectiveAdult
+                ? json.data
+                : (json.data.length >= 10 ? json.data : [...json.data, ...localFiltered]);
+              setWallpaperPool(initialPool);
               setCurrentIndex(0);
+
+              // Eagerly prefetch page 2 in background so user has a generous initial buffer of 35-50+ wallpapers
+              if (json.data.length < 35) {
+                setTimeout(() => {
+                  if (!isRefillingRef.current) {
+                    isRefillingRef.current = true;
+                    fetchCloudWallpapers(cfg, true);
+                  }
+                }, 600);
+              }
             }
             setIsFetchingPool(false);
             isRefillingRef.current = false;
@@ -265,11 +344,11 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Auto-Refill when approaching end of pool (<= 3 items remaining)
+  // Auto-Refill when approaching end of pool (<= 5 items remaining)
   useEffect(() => {
     if (
       wallpaperPool.length > 4 &&
-      currentIndex >= wallpaperPool.length - 3 &&
+      currentIndex >= wallpaperPool.length - 5 &&
       !isRefillingRef.current &&
       !isFetchingPool
     ) {
@@ -298,11 +377,18 @@ export function App() {
     [fetchCloudWallpapers]
   );
 
-  // Next / Prev actions
+  // Next / Prev actions with proactive auto-fetch before pool exhausts
   const handleNext = useCallback(() => {
     setIsCurrentImageLoaded(false);
-    setCurrentIndex((prev) => (prev + 1) % Math.max(1, wallpaperPool.length));
-  }, [wallpaperPool.length]);
+    setCurrentIndex((prev) => {
+      const nextIdx = prev + 1;
+      if (nextIdx >= wallpaperPool.length - 4 && !isRefillingRef.current && !isFetchingPool) {
+        isRefillingRef.current = true;
+        fetchCloudWallpapers(filterConfig, true);
+      }
+      return nextIdx % Math.max(1, wallpaperPool.length);
+    });
+  }, [wallpaperPool.length, filterConfig, isFetchingPool, fetchCloudWallpapers]);
 
   const handlePrev = useCallback(() => {
     setIsCurrentImageLoaded(false);
@@ -395,78 +481,105 @@ export function App() {
     });
   }, []);
 
-  const [downloadNotice, setDownloadNotice] = useState<string | null>(null);
+  const [downloadNotice, setDownloadNotice] = useState<{
+    text: string;
+    dirName?: string;
+  } | null>(null);
 
-  // Save current wallpaper (Supports File System Save Picker for folder selection & Blob force download)
-  const handleSaveCurrentImage = useCallback(async () => {
-    if (!currentWallpaper) return;
-    const downloadUrl = currentWallpaper.rawUrl || currentWallpaper.url;
-    const cleanSource = (currentWallpaper.source || 'Wallpaper').replace(/[^a-zA-Z0-9]/g, '');
-    const filename = `Ambient4K_${cleanSource}_${currentWallpaper.id}.jpg`;
+  // Save current wallpaper (Prompts once for folder selection, subsequent saves are instant and direct)
+  const handleSaveCurrentImage = useCallback(
+    async (forcePickNewFolder: boolean = false) => {
+      if (!currentWallpaper) return;
+      const downloadUrl = currentWallpaper.rawUrl || currentWallpaper.url;
+      const cleanSource = (currentWallpaper.source || 'Wallpaper').replace(/[^a-zA-Z0-9]/g, '');
+      const filename = `Ambient4K_${cleanSource}_${currentWallpaper.id}.jpg`;
 
-    setDownloadNotice('正在准备 4K 原图...');
-
-    try {
-      // 1. Modern File System Access API: lets user choose destination directory directly!
-      if ('showSaveFilePicker' in window) {
+      // 1. Modern File System Access API: Directory Picker (Chrome / Edge / Opera)
+      if ('showDirectoryPicker' in window) {
         try {
-          const handle = await (window as any).showSaveFilePicker({
-            suggestedName: filename,
-            types: [
-              {
-                description: '4K Ultra HD Wallpaper (*.jpg)',
-                accept: { 'image/jpeg': ['.jpg', '.jpeg'] },
-              },
-            ],
-          });
+          let dirHandle = savedDirectoryHandleRef.current;
 
-          setDownloadNotice('正在写入所选文件夹...');
+          // If first time or user pressed Shift+D / clicked "更换文件夹", prompt for directory
+          if (forcePickNewFolder || !dirHandle) {
+            setDownloadNotice({ text: '请选择保存壁纸的文件夹（仅需指定一次，后续按 D 键静默存入）...' });
+            dirHandle = await (window as any).showDirectoryPicker({
+              mode: 'readwrite',
+              startIn: 'downloads',
+            });
+            savedDirectoryHandleRef.current = dirHandle;
+            setSavedDirName(dirHandle.name);
+            await storeDirectoryHandle(dirHandle);
+          } else {
+            // Verify permission on existing handle
+            let perm = await dirHandle.queryPermission({ mode: 'readwrite' });
+            if (perm !== 'granted') {
+              perm = await dirHandle.requestPermission({ mode: 'readwrite' });
+            }
+            if (perm !== 'granted') {
+              setDownloadNotice({ text: '请重新授权保存文件夹...' });
+              dirHandle = await (window as any).showDirectoryPicker({
+                mode: 'readwrite',
+                startIn: 'downloads',
+              });
+              savedDirectoryHandleRef.current = dirHandle;
+              setSavedDirName(dirHandle.name);
+              await storeDirectoryHandle(dirHandle);
+            }
+          }
+
+          setDownloadNotice({ text: `正在保存到「${dirHandle.name}」...` });
           const res = await fetch(downloadUrl);
           const blob = await res.blob();
-          const writable = await handle.createWritable();
+          const fileHandle = await dirHandle.getFileHandle(filename, { create: true });
+          const writable = await fileHandle.createWritable();
           await writable.write(blob);
           await writable.close();
 
-          setDownloadNotice('✓ 已成功保存到所选文件夹！');
-          setTimeout(() => setDownloadNotice(null), 3500);
+          setDownloadNotice({
+            text: `✓ 已保存至文件夹「${dirHandle.name}」`,
+            dirName: dirHandle.name,
+          });
+          setTimeout(() => setDownloadNotice(null), 4000);
           return;
         } catch (err: any) {
           if (err?.name === 'AbortError') {
             setDownloadNotice(null);
-            return; // User clicked Cancel in picker
+            return; // User cancelled picker
           }
-          // If picker fails, fall through to Blob download
+          // If filesystem access encounters issues, fall through to blob download
         }
       }
 
-      // 2. Cross-browser forced Blob download (avoids opening in new tab)
-      setDownloadNotice('正在下载 4K 原图...');
-      const res = await fetch(downloadUrl);
-      const blob = await res.blob();
-      const blobUrl = URL.createObjectURL(blob);
+      // 2. Cross-browser fallback: direct Blob download
+      try {
+        setDownloadNotice({ text: '正在下载 4K 原图...' });
+        const res = await fetch(downloadUrl);
+        const blob = await res.blob();
+        const blobUrl = URL.createObjectURL(blob);
 
-      const link = document.createElement('a');
-      link.href = blobUrl;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
 
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
-      setDownloadNotice('✓ 已成功触发下载！');
-      setTimeout(() => setDownloadNotice(null), 3500);
-    } catch {
-      // 3. Fallback direct anchor download
-      const link = document.createElement('a');
-      link.href = downloadUrl;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      setDownloadNotice('✓ 已触发下载！');
-      setTimeout(() => setDownloadNotice(null), 3500);
-    }
-  }, [currentWallpaper]);
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+        setDownloadNotice({ text: '✓ 已成功保存到下载目录！' });
+        setTimeout(() => setDownloadNotice(null), 3500);
+      } catch {
+        const link = document.createElement('a');
+        link.href = downloadUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setDownloadNotice({ text: '✓ 已触发浏览器下载！' });
+        setTimeout(() => setDownloadNotice(null), 3500);
+      }
+    },
+    [currentWallpaper]
+  );
 
   // Sound change handler
   const handleSoundChange = (sound: SoundType) => {
@@ -531,7 +644,7 @@ export function App() {
         extendIdleTimerIfVisible();
       } else if (e.code === 'KeyD') {
         e.preventDefault();
-        handleSaveCurrentImage();
+        handleSaveCurrentImage(e.shiftKey);
         extendIdleTimerIfVisible();
       } else if (e.code === 'KeyC') {
         e.preventDefault();
@@ -645,7 +758,8 @@ export function App() {
           isFetchingPool={isFetchingPool}
           scaleMode={scaleMode}
           onToggleScaleMode={toggleScaleMode}
-          onSaveCurrentImage={handleSaveCurrentImage}
+          onSaveCurrentImage={() => handleSaveCurrentImage(false)}
+          savedDirName={savedDirName}
           onToggleZenMode={handleToggleUi}
           uiVisible={uiVisible || isCategoryModalOpen}
           lang={lang}
@@ -654,9 +768,18 @@ export function App() {
 
       {/* Floating Download Toast / Notice */}
       {downloadNotice && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 pointer-events-none flex items-center gap-2 px-4 py-2 rounded-full bg-black/80 backdrop-blur-md border border-white/20 text-xs text-white shadow-2xl animate-in fade-in zoom-in-95 duration-200">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-          <span className="font-medium">{downloadNotice}</span>
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2.5 px-4 py-2.5 rounded-full bg-black/85 backdrop-blur-md border border-white/20 text-xs text-white shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+          <span className="font-medium">{downloadNotice.text}</span>
+          {downloadNotice.dirName && (
+            <button
+              onClick={() => handleSaveCurrentImage(true)}
+              className="ml-2 text-amber-300 hover:text-amber-200 underline cursor-pointer font-medium shrink-0"
+              title="重新选择壁纸保存文件夹 (快捷键: Shift+D)"
+            >
+              更换文件夹
+            </button>
+          )}
         </div>
       )}
 

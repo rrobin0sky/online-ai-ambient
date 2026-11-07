@@ -41,6 +41,7 @@ interface PlayerControlsProps {
   scaleMode: ScaleMode;
   onToggleScaleMode: () => void;
   onSaveCurrentImage: () => void;
+  savedDirName?: string | null;
   onToggleZenMode?: () => void;
   uiVisible: boolean;
   lang?: 'zh' | 'en';
@@ -77,6 +78,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   scaleMode,
   onToggleScaleMode,
   onSaveCurrentImage,
+  savedDirName,
   onToggleZenMode,
   uiVisible,
   lang = 'zh',
@@ -253,7 +255,15 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
         <button
           onClick={onSaveCurrentImage}
           className="p-2 rounded-full text-slate-300 hover:text-white hover:bg-white/10 transition-colors cursor-pointer shrink-0"
-          title={isZh ? "下载保存当前 4K 原图 (按 D 键)" : "Download current 4K wallpaper (Key: D)"}
+          title={
+            isZh
+              ? savedDirName
+                ? `下载保存至「${savedDirName}」(快捷键: D, 换目录: Shift+D)`
+                : '下载保存当前 4K 原图 (快捷键: D)'
+              : savedDirName
+              ? `Save to "${savedDirName}" (Key: D, Switch: Shift+D)`
+              : 'Download current 4K wallpaper (Key: D)'
+          }
         >
           <ImageDown className="w-4 h-4" />
         </button>
