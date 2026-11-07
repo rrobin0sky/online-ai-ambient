@@ -25,7 +25,7 @@ interface CategorySettingsModalProps {
   poolCount: number;
   detectedWidth: number;
   savedDirName?: string | null;
-  onPickDirectory?: () => void;
+  onPickDirectory?: () => Promise<boolean> | void;
   onResetDirectory?: () => void;
 }
 
@@ -44,6 +44,27 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
   const [showKey, setShowKey] = useState(false);
   const [inputKey, setInputKey] = useState(config.passcodeOrKey);
   const [errorTip, setErrorTip] = useState('');
+  const [isPickingDir, setIsPickingDir] = useState(false);
+  const [pickFeedback, setPickFeedback] = useState<string | null>(null);
+
+  const handlePickClick = async () => {
+    if (!onPickDirectory || isPickingDir) return;
+    setIsPickingDir(true);
+    setPickFeedback('正在打开系统文件夹选择窗口...');
+    try {
+      const res = await onPickDirectory();
+      if (res) {
+        setPickFeedback('✓ 文件夹绑定成功！');
+      } else {
+        setPickFeedback(null);
+      }
+    } catch (err: any) {
+      setPickFeedback(`选择异常: ${err?.message || '请重试'}`);
+    } finally {
+      setIsPickingDir(false);
+      setTimeout(() => setPickFeedback(null), 3500);
+    }
+  };
 
   // Sync internal state when config changes
   useEffect(() => {
@@ -484,23 +505,46 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
                     📁
                   </div>
                   <div className="min-w-0">
-                    <div className="text-xs font-bold text-white truncate">
-                      {savedDirName ? `当前指定保存目录：「${savedDirName}」` : '尚未绑定专用文件夹'}
+                    <div className="text-xs font-bold text-white truncate flex items-center gap-1.5">
+                      {savedDirName ? (
+                        <>
+                          <span>当前保存目录：</span>
+                          <span className="text-amber-300 font-mono bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
+                            {savedDirName}
+                          </span>
+                        </>
+                      ) : (
+                        '尚未绑定专用文件夹'
+                      )}
                     </div>
-                    <div className="text-[11px] text-slate-400 truncate">
+                    <div className="text-[11px] text-slate-400 truncate mt-0.5">
                       {savedDirName
                         ? '按 D 键时壁纸将静默自动存入该文件夹'
-                        : '默认保存至浏览器下载目录，点击右侧可绑定文件夹'}
+                        : '默认保存至浏览器下载目录，点击右侧可选择专用文件夹'}
                     </div>
+                    {pickFeedback && (
+                      <div className="text-[11px] text-amber-300 font-medium animate-pulse mt-1">
+                        {pickFeedback}
+                      </div>
+                    )}
                   </div>
                 </div>
 
                 {onPickDirectory && (
                   <button
-                    onClick={onPickDirectory}
-                    className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-black text-xs font-bold transition-all cursor-pointer shrink-0 ml-3 shadow-md hover:shadow-lg"
+                    type="button"
+                    onClick={handlePickClick}
+                    disabled={isPickingDir}
+                    className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-60 text-black text-xs font-bold transition-all cursor-pointer shrink-0 ml-3 shadow-md hover:shadow-lg flex items-center gap-1.5"
                   >
-                    {savedDirName ? '更换文件夹' : '选择文件夹'}
+                    {isPickingDir ? (
+                      <>
+                        <span className="w-3 h-3 border-2 border-black border-t-transparent rounded-full animate-spin" />
+                        <span>打开中...</span>
+                      </>
+                    ) : (
+                      savedDirName ? '更换文件夹' : '选择文件夹'
+                    )}
                   </button>
                 )}
               </div>

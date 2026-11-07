@@ -280,7 +280,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
             >
               <FolderSync className="w-3.5 h-3.5 text-amber-300 shrink-0" />
               <span className="max-w-[100px] truncate">
-                {savedDirName ? savedDirName : (isZh ? '更换文件夹' : 'Folder')}
+                {savedDirName ? savedDirName : (isZh ? '指定文件夹' : 'Select Folder')}
               </span>
             </button>
           )}

@@ -507,22 +507,64 @@ export function App() {
   } | null>(null);
 
   // Explicitly prompt directory picker to select or change download folder
-  const handlePickDirectory = useCallback(async () => {
+  const handlePickDirectory = useCallback(async (): Promise<boolean> => {
     if (!('showDirectoryPicker' in window)) {
       setDownloadNotice({
         text: '当前浏览器（Safari/Firefox）受安全限制不支持网页指定本地外部文件夹，按 D 将下载至系统「下载」目录。推荐使用 Chrome 或 Ambient4K 原生 Mac App。',
       });
       setTimeout(() => setDownloadNotice(null), 5000);
-      return;
+      return false;
     }
 
     try {
       setDownloadNotice({ text: '请在弹出的系统窗口中选择保存壁纸的文件夹...' });
-      const dirHandle = await (window as any).showDirectoryPicker({
-        mode: 'readwrite',
-        startIn: 'downloads',
-      });
+      
+      let dirHandle: any = null;
+      // 1. Try standard showDirectoryPicker without startIn restrictions (which trigger SecurityError in Chromium)
+      try {
+        dirHandle = await (window as any).showDirectoryPicker({
+          id: 'ambient4k_save_dir',
+          mode: 'readwrite',
+        });
+      } catch (optErr: any) {
+        if (optErr?.name === 'AbortError') {
+          console.log('[DirectoryPicker] User closed or aborted picker dialog.');
+          setDownloadNotice({ text: '已取消选择文件夹' });
+          setTimeout(() => setDownloadNotice(null), 2500);
+          return false;
+        }
+        console.warn('[DirectoryPicker] showDirectoryPicker with options failed, retrying bare call:', optErr);
+        // Fallback: call bare showDirectoryPicker() without arguments
+        try {
+          dirHandle = await (window as any).showDirectoryPicker();
+        } catch (bareErr: any) {
+          if (bareErr?.name === 'AbortError') {
+            console.log('[DirectoryPicker] User closed or aborted bare picker dialog.');
+            setDownloadNotice({ text: '已取消选择文件夹' });
+            setTimeout(() => setDownloadNotice(null), 2500);
+            return false;
+          }
+          throw bareErr;
+        }
+      }
+
       if (dirHandle) {
+        // Ensure readwrite permission
+        try {
+          let perm = 'granted';
+          if (typeof dirHandle.queryPermission === 'function') {
+            perm = await dirHandle.queryPermission({ mode: 'readwrite' });
+          }
+          if (perm !== 'granted' && typeof dirHandle.requestPermission === 'function') {
+            perm = await dirHandle.requestPermission({ mode: 'readwrite' });
+          }
+          if (perm !== 'granted') {
+            console.warn('[DirectoryPicker] Write permission was not granted by user.');
+          }
+        } catch (permErr) {
+          console.warn('[DirectoryPicker] Permission query/request error:', permErr);
+        }
+
         savedDirectoryHandleRef.current = dirHandle;
         setSavedDirName(dirHandle.name);
         await storeDirectoryHandle(dirHandle);
@@ -531,14 +573,18 @@ export function App() {
           dirName: dirHandle.name,
         });
         setTimeout(() => setDownloadNotice(null), 4500);
+        return true;
       }
+      return false;
     } catch (err: any) {
+      console.error('[DirectoryPicker] Error selecting directory:', err);
       if (err?.name === 'AbortError') {
-        setDownloadNotice(null);
+        setDownloadNotice({ text: '已取消选择文件夹' });
       } else {
-        setDownloadNotice({ text: '选择文件夹未完成或未授权' });
-        setTimeout(() => setDownloadNotice(null), 3000);
+        setDownloadNotice({ text: `选择文件夹失败: ${err?.message || '请确认浏览器权限'}` });
       }
+      setTimeout(() => setDownloadNotice(null), 3500);
+      return false;
     }
   }, []);
 
@@ -576,13 +622,36 @@ export function App() {
           // If first time, prompt for directory once
           if (!dirHandle) {
             setDownloadNotice({ text: '请选择保存壁纸的文件夹（仅需指定一次，后续按 D 键静默存入）...' });
-            dirHandle = await (window as any).showDirectoryPicker({
-              mode: 'readwrite',
-              startIn: 'downloads',
-            });
-            savedDirectoryHandleRef.current = dirHandle;
-            setSavedDirName(dirHandle.name);
-            await storeDirectoryHandle(dirHandle);
+            try {
+              dirHandle = await (window as any).showDirectoryPicker({
+                id: 'ambient4k_save_dir',
+                mode: 'readwrite',
+              });
+            } catch (optErr: any) {
+              if (optErr?.name === 'AbortError') {
+                setDownloadNotice(null);
+                return;
+              }
+              try {
+                dirHandle = await (window as any).showDirectoryPicker();
+              } catch (bareErr: any) {
+                if (bareErr?.name === 'AbortError') {
+                  setDownloadNotice(null);
+                  return;
+                }
+                throw bareErr;
+              }
+            }
+            if (dirHandle) {
+              try {
+                if (typeof dirHandle.requestPermission === 'function') {
+                  await dirHandle.requestPermission({ mode: 'readwrite' });
+                }
+              } catch {}
+              savedDirectoryHandleRef.current = dirHandle;
+              setSavedDirName(dirHandle.name);
+              await storeDirectoryHandle(dirHandle);
+            }
           } else {
             // Verify permission without repeatedly popping up the picker if denied
             let perm = 'denied';
@@ -840,7 +909,7 @@ export function App() {
 
       {/* Floating Download Toast / Notice */}
       {downloadNotice && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2.5 px-4 py-2.5 rounded-full bg-black/85 backdrop-blur-md border border-white/20 text-xs text-white shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-2.5 px-4 py-2.5 rounded-full bg-black/90 backdrop-blur-md border border-white/20 text-xs text-white shadow-2xl animate-in fade-in zoom-in-95 duration-200">
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
           <span className="font-medium">{downloadNotice.text}</span>
           {'showDirectoryPicker' in window && (
