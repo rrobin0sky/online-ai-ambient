@@ -36,15 +36,15 @@ function randomSeed(): string {
   return out;
 }
 
-const CATEGORY_QUERY_MAP: Record<string, { q: string; categories: string }> = {
-  all: { q: '', categories: '111' },
-  nature: { q: 'landscape OR mountains OR aurora OR nature OR ocean', categories: '100' },
-  scifi: { q: 'cyberpunk OR sci-fi OR nebula OR space OR futuristic', categories: '100' },
-  anime: { q: 'anime', categories: '010' },
-  beauty: { q: 'model OR portrait OR girl OR women OR asian', categories: '001' },
-  supercars: { q: 'supercar OR sports car OR automotive', categories: '100' },
-  cityscape: { q: 'cityscape OR night city OR architecture OR tokyo', categories: '100' },
-  minimalist: { q: 'minimalist OR dark aesthetic OR oled OR abstract', categories: '100' },
+const CATEGORY_MAP: Record<string, { keywords: string[]; categories: string }> = {
+  all: { keywords: [''], categories: '111' },
+  nature: { keywords: ['landscape', 'nature', 'mountains', 'aurora', 'ocean', 'forest', 'lake'], categories: '100' },
+  scifi: { keywords: ['cyberpunk', 'sci-fi', 'space', 'nebula', 'futuristic', 'galaxy'], categories: '100' },
+  anime: { keywords: ['anime', 'manga', 'illustration', 'fantasy'], categories: '010' },
+  beauty: { keywords: ['model', 'portrait', 'girl', 'asian', 'beauty'], categories: '001' },
+  supercars: { keywords: ['supercar', 'porsche', 'ferrari', 'lamborghini', 'sports car'], categories: '100' },
+  cityscape: { keywords: ['cityscape', 'tokyo', 'night city', 'architecture', 'metropolis'], categories: '100' },
+  minimalist: { keywords: ['minimalist', 'dark aesthetic', 'oled', 'abstract', 'geometry'], categories: '100' },
 };
 
 function getCanonicalReferer(targetHost: string, protocol: string): string {
@@ -76,10 +76,17 @@ async function fetchWallhaven(params: {
 }): Promise<UnifiedWallpaper[]> {
   try {
     const { category, customQuery, adultMode, purityMode, apiKey, origin, targetWidth, page, seed } = params;
-    const preset = CATEGORY_QUERY_MAP[category] || CATEGORY_QUERY_MAP.all;
-    const queryStr = category === 'custom' && customQuery.trim() ? customQuery.trim() : preset.q;
+    const catConfig = CATEGORY_MAP[category] || CATEGORY_MAP.all;
 
-    let catBitmask = preset.categories;
+    let queryStr = '';
+    if (category === 'custom' && customQuery.trim()) {
+      queryStr = customQuery.trim();
+    } else if (catConfig.keywords.length > 0 && catConfig.keywords[0] !== '') {
+      const idx = Math.max(0, page - 1) % catConfig.keywords.length;
+      queryStr = catConfig.keywords[idx];
+    }
+
+    let catBitmask = catConfig.categories;
     if (category === 'custom') catBitmask = '111';
     if (adultMode && (category === 'beauty' || category === 'all')) {
       catBitmask = category === 'beauty' ? '001' : '111';
@@ -111,15 +118,34 @@ async function fetchWallhaven(params: {
       searchUrl.searchParams.set('apikey', apiKey);
     }
 
-    const res = await fetch(searchUrl.toString(), {
+    let res = await fetch(searchUrl.toString(), {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
         ...(apiKey && adultMode ? { 'X-API-Key': apiKey } : {}),
       },
     });
 
-    if (!res.ok) return [];
-    const json: any = await res.json();
+    let json: any = res.ok ? await res.json() : null;
+
+    // 弹性保底：若特定关键字搜索结果为空，立即降级使用分类掩码全量随机池，确保永远有高质壁纸返回
+    if (!json || !Array.isArray(json.data) || json.data.length === 0) {
+      if (queryStr) {
+        searchUrl.searchParams.delete('q');
+        const fallbackRes = await fetch(searchUrl.toString(), {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+            ...(apiKey && adultMode ? { 'X-API-Key': apiKey } : {}),
+          },
+        });
+        if (fallbackRes.ok) {
+          const fallbackJson: any = await fallbackRes.json();
+          if (fallbackJson && Array.isArray(fallbackJson.data)) {
+            json = fallbackJson;
+          }
+        }
+      }
+    }
+
     if (!json || !Array.isArray(json.data)) return [];
 
     return json.data
@@ -178,7 +204,12 @@ async function fetchYande(params: {
       tags.push(customQuery.trim().replace(/\s+/g, '_').toLowerCase());
     }
 
-    const targetPage = Math.max(1, page);
+    if (tags.length === 0) {
+      tags.push('order:random');
+      tags.push('width:>=2560');
+    }
+
+    const targetPage = page <= 1 ? Math.floor(Math.random() * 25) + 1 : page;
     const url = new URL('https://yande.re/post.json');
     url.searchParams.set('limit', '18');
     url.searchParams.set('page', String(targetPage));
@@ -247,7 +278,12 @@ async function fetchKonachan(params: {
       tags.push('rating:q');
     }
 
-    const targetPage = Math.max(1, page);
+    if (tags.length === 0) {
+      tags.push('order:random');
+      tags.push('width:>=2560');
+    }
+
+    const targetPage = page <= 1 ? Math.floor(Math.random() * 25) + 1 : page;
     const url = new URL(domain);
     url.searchParams.set('limit', '14');
     url.searchParams.set('page', String(targetPage));

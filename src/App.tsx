@@ -88,6 +88,26 @@ async function storeDirectoryHandle(handle: FileSystemDirectoryHandle): Promise<
   }
 }
 
+async function fetchSafeBlob(url: string): Promise<Blob> {
+  // 1. Try direct fetch
+  try {
+    const res = await fetch(url, { mode: 'cors' });
+    if (res.ok) {
+      return await res.blob();
+    }
+  } catch {
+    // Fallback to proxy
+  }
+
+  // 2. Fallback to Cloudflare edge image proxy which always returns CORS headers
+  const proxyUrl = url.includes('/api/image-proxy')
+    ? url
+    : `/api/image-proxy?url=${encodeURIComponent(url)}`;
+  const proxyRes = await fetch(proxyUrl);
+  if (!proxyRes.ok) throw new Error(`Download failed with status ${proxyRes.status}`);
+  return await proxyRes.blob();
+}
+
 function getOptimalStreamWidth(mode: QualityMode = 'auto'): number {
   if (mode === 'raw') return 0; // 0 = uncompressed original
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -510,26 +530,23 @@ export function App() {
             setSavedDirName(dirHandle.name);
             await storeDirectoryHandle(dirHandle);
           } else {
-            // Verify permission on existing handle
-            let perm = await dirHandle.queryPermission({ mode: 'readwrite' });
-            if (perm !== 'granted') {
-              perm = await dirHandle.requestPermission({ mode: 'readwrite' });
+            // Verify permission without repeatedly popping up the picker if denied
+            let perm = 'denied';
+            try {
+              perm = await dirHandle.queryPermission({ mode: 'readwrite' });
+              if (perm !== 'granted') {
+                perm = await dirHandle.requestPermission({ mode: 'readwrite' });
+              }
+            } catch {
+              // Ignore gesture requirement errors
             }
             if (perm !== 'granted') {
-              setDownloadNotice({ text: '请重新授权保存文件夹...' });
-              dirHandle = await (window as any).showDirectoryPicker({
-                mode: 'readwrite',
-                startIn: 'downloads',
-              });
-              savedDirectoryHandleRef.current = dirHandle;
-              setSavedDirName(dirHandle.name);
-              await storeDirectoryHandle(dirHandle);
+              throw new Error('Directory permission not granted, falling back to direct download');
             }
           }
 
           setDownloadNotice({ text: `正在保存到「${dirHandle.name}」...` });
-          const res = await fetch(downloadUrl);
-          const blob = await res.blob();
+          const blob = await fetchSafeBlob(downloadUrl);
           const fileHandle = await dirHandle.getFileHandle(filename, { create: true });
           const writable = await fileHandle.createWritable();
           await writable.write(blob);
@@ -546,15 +563,14 @@ export function App() {
             setDownloadNotice(null);
             return; // User cancelled picker
           }
-          // If filesystem access encounters issues, fall through to blob download
+          // If filesystem access encounters issues, fall through to safe blob download
         }
       }
 
-      // 2. Cross-browser fallback: direct Blob download
+      // 2. Cross-browser fallback: direct safe Blob download (NEVER navigates current tab away!)
       try {
         setDownloadNotice({ text: '正在下载 4K 原图...' });
-        const res = await fetch(downloadUrl);
-        const blob = await res.blob();
+        const blob = await fetchSafeBlob(downloadUrl);
         const blobUrl = URL.createObjectURL(blob);
 
         const link = document.createElement('a');
@@ -567,14 +583,10 @@ export function App() {
         setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
         setDownloadNotice({ text: '✓ 已成功保存到下载目录！' });
         setTimeout(() => setDownloadNotice(null), 3500);
-      } catch {
-        const link = document.createElement('a');
-        link.href = downloadUrl;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        setDownloadNotice({ text: '✓ 已触发浏览器下载！' });
+      } catch (dlErr: any) {
+        // Last-resort fallback: open in a NEW window/tab so current ambient player is never lost
+        window.open(downloadUrl, '_blank');
+        setDownloadNotice({ text: '✓ 已在新窗口打开原图下载！' });
         setTimeout(() => setDownloadNotice(null), 3500);
       }
     },
