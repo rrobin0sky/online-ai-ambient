@@ -8,6 +8,7 @@ import { CategorySettingsModal } from './components/CategorySettingsModal';
 import { WallpaperStage, ScaleMode } from './components/WallpaperStage';
 import { soundManager } from './services/soundSynthesizer';
 import { SoundType, PlayerFilterConfig, WallpaperItem, QualityMode } from './types';
+import { isSubframe, openInTopLevel } from './utils/browser';
 
 const STORAGE_KEY = 'ambient4k_web_filter_v2';
 
@@ -508,6 +509,14 @@ export function App() {
 
   // Explicitly prompt directory picker to select or change download folder
   const handlePickDirectory = useCallback(async (): Promise<boolean> => {
+    if (isSubframe()) {
+      setDownloadNotice({
+        text: '当前处于内嵌预览框架中，浏览器禁止调起文件夹选择器。请点击右侧在新标签页打开独立使用。',
+      });
+      setTimeout(() => setDownloadNotice(null), 6000);
+      return false;
+    }
+
     if (!('showDirectoryPicker' in window)) {
       setDownloadNotice({
         text: '当前浏览器（Safari/Firefox）受安全限制不支持网页指定本地外部文件夹，按 D 将下载至系统「下载」目录。推荐使用 Chrome 或 Ambient4K 原生 Mac App。',
@@ -580,10 +589,14 @@ export function App() {
       console.error('[DirectoryPicker] Error selecting directory:', err);
       if (err?.name === 'AbortError') {
         setDownloadNotice({ text: '已取消选择文件夹' });
+      } else if (err?.message?.includes('Cross origin sub frames') || err?.message?.includes('sub frames')) {
+        setDownloadNotice({
+          text: '当前处于内嵌预览框架中，受浏览器安全限制无法唤起文件夹。请在新窗口独立打开使用。',
+        });
       } else {
         setDownloadNotice({ text: `选择文件夹失败: ${err?.message || '请确认浏览器权限'}` });
       }
-      setTimeout(() => setDownloadNotice(null), 3500);
+      setTimeout(() => setDownloadNotice(null), 4500);
       return false;
     }
   }, []);
@@ -615,7 +628,8 @@ export function App() {
       const filename = `Ambient4K_${cleanSource}_${currentWallpaper.id}.jpg`;
 
       // 1. Modern File System Access API: Directory Picker (Chrome / Edge / Opera)
-      if ('showDirectoryPicker' in window) {
+      // Note: Skip Directory Picker if running inside subframe, as cross-origin frames cannot show directory picker
+      if ('showDirectoryPicker' in window && !isSubframe()) {
         try {
           let dirHandle = savedDirectoryHandleRef.current;
 
@@ -909,21 +923,30 @@ export function App() {
 
       {/* Floating Download Toast / Notice */}
       {downloadNotice && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-2.5 px-4 py-2.5 rounded-full bg-black/90 backdrop-blur-md border border-white/20 text-xs text-white shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-2.5 px-4 py-2.5 rounded-full bg-black/90 backdrop-blur-md border border-white/20 text-xs text-white shadow-2xl animate-in fade-in zoom-in-95 duration-200 max-w-[92vw]">
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
-          <span className="font-medium">{downloadNotice.text}</span>
-          {'showDirectoryPicker' in window && (
+          <span className="font-medium truncate">{downloadNotice.text}</span>
+          {isSubframe() ? (
             <button
-              onClick={handlePickDirectory}
-              className="ml-2 text-amber-300 hover:text-amber-200 underline cursor-pointer font-medium shrink-0"
-              title="重新选择壁纸保存文件夹 (快捷键: Shift+D)"
+              onClick={openInTopLevel}
+              className="ml-2 px-3 py-1 rounded-full bg-amber-500 hover:bg-amber-400 text-black font-bold shrink-0 cursor-pointer text-[11px] transition-colors"
             >
-              {downloadNotice.dirName ? '更换文件夹' : '选择保存文件夹'}
+              在新窗口打开 ↗
             </button>
+          ) : (
+            'showDirectoryPicker' in window && (
+              <button
+                onClick={handlePickDirectory}
+                className="ml-2 text-amber-300 hover:text-amber-200 underline cursor-pointer font-medium shrink-0"
+                title="重新选择壁纸保存文件夹 (快捷键: Shift+D)"
+              >
+                {downloadNotice.dirName ? '更换文件夹' : '选择保存文件夹'}
+              </button>
+            )
           )}
           <button
             onClick={() => setDownloadNotice(null)}
-            className="ml-1 text-slate-400 hover:text-white p-0.5 rounded cursor-pointer"
+            className="ml-1 text-slate-400 hover:text-white p-0.5 rounded cursor-pointer shrink-0"
           >
             ✕
           </button>

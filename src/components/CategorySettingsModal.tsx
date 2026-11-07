@@ -12,9 +12,11 @@ import {
   Gauge,
   AlertCircle,
   FolderSync,
+  ExternalLink,
 } from 'lucide-react';
 import { PlayerFilterConfig, CategoryType, QualityMode } from '../types';
 import { PRESET_CATEGORIES, SUGGESTED_TAGS } from '../data/wallpapers';
+import { isSubframe, openInTopLevel } from '../utils/browser';
 
 interface CategorySettingsModalProps {
   isOpen: boolean;
@@ -498,7 +500,38 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
               )}
             </div>
 
-            {'showDirectoryPicker' in window ? (
+            {isSubframe() ? (
+              <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-xs text-slate-200 leading-relaxed space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="text-amber-300 font-bold flex items-center gap-1.5">
+                    <span className="text-sm">⚠️</span>
+                    <span>当前处于内嵌预览框架 (Subframe / iframe)</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={openInTopLevel}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-black text-xs font-bold transition-all cursor-pointer shadow hover:shadow-md shrink-0 ml-2"
+                  >
+                    <span>在新标签页独立打开</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-300 leading-normal">
+                  浏览器安全策略（Chromium 核心保护）严格禁止在跨域内嵌子框架中直接调起系统本地文件夹选择窗口。
+                </p>
+                <div className="p-2.5 rounded-xl bg-black/30 border border-white/10 text-[11px] space-y-1">
+                  <div className="text-emerald-400 font-semibold flex items-center gap-1">
+                    <span>💡 两种使用方式：</span>
+                  </div>
+                  <p className="text-slate-300">
+                    1. <strong>在新标签页独立打开</strong>：直接以顶层窗口运行，无安全限制，可自由指定 iCloud / 本地专用文件夹静默存入；
+                  </p>
+                  <p className="text-slate-300">
+                    2. <strong>在当前窗口继续浏览</strong>：直接按键盘 <kbd className="px-1.5 py-0.5 rounded bg-white/20 font-mono text-[10px] text-white">D</kbd> 键，依然会自动安全下载 4K 壁纸原图至系统的「下载」文件夹。
+                  </p>
+                </div>
+              </div>
+            ) : 'showDirectoryPicker' in window ? (
               <div className="flex items-center justify-between p-3.5 rounded-xl bg-white/5 border border-white/10">
                 <div className="flex items-center gap-2.5 min-w-0">
                   <div className="w-8 h-8 rounded-lg bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-base shrink-0">
