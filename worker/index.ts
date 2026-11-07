@@ -37,7 +37,7 @@ function randomSeed(): string {
 }
 
 const CATEGORY_MAP: Record<string, { keywords: string[]; categories: string }> = {
-  all: { keywords: [''], categories: '111' },
+  all: { keywords: ['4k wallpaper', 'ultra hd', 'landscape', 'cyberpunk', 'nature', 'cityscape', 'minimalist', 'supercar'], categories: '111' },
   nature: { keywords: ['landscape', 'nature', 'mountains', 'aurora', 'ocean', 'forest', 'lake'], categories: '100' },
   scifi: { keywords: ['cyberpunk', 'sci-fi', 'space', 'nebula', 'futuristic', 'galaxy'], categories: '100' },
   anime: { keywords: ['anime', 'manga', 'illustration', 'fantasy'], categories: '010' },
@@ -114,14 +114,13 @@ async function fetchWallhaven(params: {
         searchUrl.searchParams.set('q', queryStr);
       }
     }
-    if (apiKey && adultMode) {
-      searchUrl.searchParams.set('apikey', apiKey);
-    }
+    const finalApiKey = (apiKey && adultMode) ? apiKey : VIP_WALLHAVEN_KEY;
+    searchUrl.searchParams.set('apikey', finalApiKey);
 
     let res = await fetch(searchUrl.toString(), {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-        ...(apiKey && adultMode ? { 'X-API-Key': apiKey } : {}),
+        'X-API-Key': finalApiKey,
       },
     });
 
@@ -378,7 +377,7 @@ export default {
         }),
       ];
 
-      if ((adultMode || category === 'anime') && enableYande) {
+      if ((adultMode || category === 'anime' || category === 'all') && enableYande) {
         tasks.push(
           fetchYande({
             category,
@@ -392,7 +391,7 @@ export default {
         );
       }
 
-      if ((adultMode || category === 'anime') && enableKonachan) {
+      if ((adultMode || category === 'anime' || category === 'all') && enableKonachan) {
         tasks.push(
           fetchKonachan({
             category,
@@ -510,7 +509,51 @@ export default {
       }
     }
 
-    // 3. Fallback to static frontend assets
+    // 3. Cross-Origin API Proxy for Native Clients (Bypasses GFW for Wallhaven, Yande, Konachan API)
+    if (url.pathname === '/api/proxy') {
+      const targetUrl = url.searchParams.get('url');
+      if (!targetUrl || !targetUrl.startsWith('https://')) {
+        return new Response('Invalid target URL', { status: 400, headers: CORS_HEADERS });
+      }
+
+      try {
+        const parsedTarget = new URL(targetUrl);
+        const canonicalReferer = getCanonicalReferer(parsedTarget.host, parsedTarget.protocol);
+
+        const upstreamHeaders: Record<string, string> = {
+          'User-Agent':
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+          Referer: canonicalReferer,
+          Accept: 'application/json, text/plain, */*',
+        };
+
+        const authHeader = request.headers.get('X-API-Key');
+        if (authHeader) {
+          upstreamHeaders['X-API-Key'] = authHeader;
+        }
+
+        const apiRes = await fetch(targetUrl, {
+          method: request.method,
+          headers: upstreamHeaders,
+        });
+
+        const headers = new Headers(CORS_HEADERS);
+        headers.set('Content-Type', apiRes.headers.get('Content-Type') || 'application/json; charset=utf-8');
+        headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+
+        return new Response(apiRes.body, {
+          status: apiRes.status,
+          headers,
+        });
+      } catch (err: any) {
+        return new Response(JSON.stringify({ error: err?.message || 'Proxy error' }), {
+          status: 502,
+          headers: CORS_HEADERS,
+        });
+      }
+    }
+
+    // 4. Fallback to static frontend assets
     if (env.ASSETS) {
       return env.ASSETS.fetch(request);
     }
