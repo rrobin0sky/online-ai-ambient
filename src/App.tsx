@@ -22,11 +22,20 @@ const DEFAULT_FILTER_CONFIG: PlayerFilterConfig = {
   qualityMode: 'auto',
 };
 
+function isPasscodeValid(passcodeOrKey: string): boolean {
+  const trimmed = (passcodeOrKey || '').trim();
+  return trimmed === 'bin0sky.tech' || trimmed.length >= 16;
+}
+
 function loadSavedConfig(): PlayerFilterConfig {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULT_FILTER_CONFIG;
-    return { ...DEFAULT_FILTER_CONFIG, ...JSON.parse(raw) };
+    const parsed: PlayerFilterConfig = { ...DEFAULT_FILTER_CONFIG, ...JSON.parse(raw) };
+    if (parsed.adultMode && !isPasscodeValid(parsed.passcodeOrKey)) {
+      parsed.adultMode = false;
+    }
+    return parsed;
   } catch {
     return DEFAULT_FILTER_CONFIG;
   }
@@ -198,11 +207,13 @@ export function App() {
       );
 
       try {
+        const isAuth = isPasscodeValid(cfg.passcodeOrKey);
+        const effectiveAdult = cfg.adultMode && isAuth;
         const params = new URLSearchParams({
           category: cfg.category,
           q: cfg.customQuery,
-          adult: cfg.adultMode ? '1' : '0',
-          purity: cfg.adultMode ? cfg.purityMode : '100',
+          adult: effectiveAdult ? '1' : '0',
+          purity: effectiveAdult ? cfg.purityMode : '100',
           key: cfg.passcodeOrKey.trim(),
           yande: cfg.enableYande ? '1' : '0',
           konachan: cfg.enableKonachan ? '1' : '0',
@@ -223,7 +234,7 @@ export function App() {
               });
             } else {
               const combined =
-                cfg.adultMode && cfg.purityMode === '001'
+                effectiveAdult && cfg.purityMode === '001'
                   ? json.data
                   : [...json.data, ...localFiltered];
               setWallpaperPool(combined);
@@ -270,14 +281,18 @@ export function App() {
   // Update config & persist to localStorage
   const handleUpdateConfig = useCallback(
     (newConfig: PlayerFilterConfig, triggerFetch: boolean = false) => {
-      setFilterConfig(newConfig);
+      const sanitizedConfig: PlayerFilterConfig = {
+        ...newConfig,
+        adultMode: newConfig.adultMode && isPasscodeValid(newConfig.passcodeOrKey),
+      };
+      setFilterConfig(sanitizedConfig);
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(newConfig));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(sanitizedConfig));
       } catch {
         // Ignore storage quota errors
       }
       if (triggerFetch) {
-        fetchCloudWallpapers(newConfig, false);
+        fetchCloudWallpapers(sanitizedConfig, false);
       }
     },
     [fetchCloudWallpapers]

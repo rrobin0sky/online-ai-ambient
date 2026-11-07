@@ -86,8 +86,8 @@ async function fetchWallhaven(params: {
     }
 
     let purity = '100';
-    if (adultMode) {
-      purity = apiKey ? purityMode || '111' : '110';
+    if (adultMode && apiKey) {
+      purity = purityMode || '111';
     }
 
     const searchUrl = new URL('https://wallhaven.cc/api/v1/search');
@@ -287,21 +287,25 @@ export default {
     if (url.pathname === '/api/wallpapers') {
       const category = url.searchParams.get('category') || 'all';
       const customQuery = url.searchParams.get('q') || '';
-      const adultMode = url.searchParams.get('adult') === '1' || url.searchParams.get('adult') === 'true';
-      const purityMode = url.searchParams.get('purity') || (adultMode ? '111' : '100');
+      const reqAdult = url.searchParams.get('adult') === '1' || url.searchParams.get('adult') === 'true';
       const passcodeOrKey = (url.searchParams.get('key') || '').trim();
       const enableYande = url.searchParams.get('yande') !== '0';
       const enableKonachan = url.searchParams.get('konachan') !== '0';
       const targetWidth = Number(url.searchParams.get('w') ?? '2560');
 
       let effectiveApiKey = '';
-      let unlockedByPasscode = false;
+      let isAuthorized = false;
       if (passcodeOrKey === VIP_PASSCODE) {
         effectiveApiKey = VIP_WALLHAVEN_KEY;
-        unlockedByPasscode = true;
+        isAuthorized = true;
       } else if (passcodeOrKey.length >= 16) {
         effectiveApiKey = passcodeOrKey;
+        isAuthorized = true;
       }
+
+      // 强安全守卫：只有密码完全正确 (bin0sky.tech) 或配置了有效 Key，才允许启用成人模式
+      const adultMode = reqAdult && isAuthorized;
+      const purityMode = adultMode ? (url.searchParams.get('purity') || '111') : '100';
 
       const origin = url.origin;
 

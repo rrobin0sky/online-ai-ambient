@@ -1,9 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   Sparkles,
   Lock,
-  Unlock,
   RefreshCw,
   CheckCircle2,
   Eye,
@@ -11,6 +10,7 @@ import {
   Flame,
   Search,
   Gauge,
+  AlertCircle,
 } from 'lucide-react';
 import { PlayerFilterConfig, CategoryType, QualityMode } from '../types';
 import { PRESET_CATEGORIES, SUGGESTED_TAGS } from '../data/wallpapers';
@@ -35,11 +35,51 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
   detectedWidth,
 }) => {
   const [showKey, setShowKey] = useState(false);
+  const [inputKey, setInputKey] = useState(config.passcodeOrKey);
+  const [errorTip, setErrorTip] = useState('');
+
+  // Sync internal state when config changes
+  useEffect(() => {
+    setInputKey(config.passcodeOrKey);
+  }, [config.passcodeOrKey]);
 
   if (!isOpen) return null;
 
   const isVipUnlocked = config.passcodeOrKey.trim() === 'bin0sky.tech';
   const hasCustomKey = !isVipUnlocked && config.passcodeOrKey.trim().length >= 16;
+  const isUnlocked = isVipUnlocked || hasCustomKey;
+
+  const handleVerifyAndUnlock = () => {
+    const trimmed = inputKey.trim();
+    if (trimmed === 'bin0sky.tech' || trimmed.length >= 16) {
+      setErrorTip('');
+      onUpdateConfig({ ...config, passcodeOrKey: trimmed, adultMode: true }, true);
+    } else {
+      setErrorTip(trimmed ? '密码不正确，请输入正确的访问密码' : '请输入访问密码');
+    }
+  };
+
+  const handleToggleAdultMode = () => {
+    if (config.adultMode) {
+      setErrorTip('');
+      onUpdateConfig({ ...config, adultMode: false }, true);
+      return;
+    }
+
+    const trimmed = inputKey.trim();
+    if (trimmed === 'bin0sky.tech' || trimmed.length >= 16) {
+      setErrorTip('');
+      onUpdateConfig({ ...config, passcodeOrKey: trimmed, adultMode: true }, true);
+    } else {
+      setErrorTip(trimmed ? '密码不正确，无法开启成人模式' : '请先在下方输入访问密码并验证解锁');
+    }
+  };
+
+  const handleLock = () => {
+    setInputKey('');
+    setErrorTip('');
+    onUpdateConfig({ ...config, passcodeOrKey: '', adultMode: false }, true);
+  };
 
   const handleCategoryClick = (catId: CategoryType) => {
     const next = { ...config, category: catId };
@@ -261,12 +301,12 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
 
               {/* Toggle Switch */}
               <button
-                onClick={() =>
-                  onUpdateConfig({ ...config, adultMode: !config.adultMode }, true)
-                }
+                type="button"
+                onClick={handleToggleAdultMode}
                 className={`w-12 h-6 rounded-full transition-colors p-0.5 cursor-pointer ${
                   config.adultMode ? 'bg-rose-600' : 'bg-slate-700'
                 }`}
+                title={config.adultMode ? "点击关闭成人模式" : (isUnlocked ? "点击开启成人模式" : "需要输入访问密码解锁")}
               >
                 <div
                   className={`w-5 h-5 rounded-full bg-white shadow transition-transform ${
@@ -276,103 +316,139 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
               </button>
             </div>
 
-            {config.adultMode && (
-              <div className="space-y-4 pt-2 border-t border-white/10 animate-in fade-in duration-200">
-                <div>
-                  <label className="text-xs text-slate-300 font-medium block mb-1.5">
-                    私人解锁码 (输入你的专属口令) 或 Wallhaven API Key：
-                  </label>
-                  <div className="relative flex items-center">
-                    <input
-                      type={showKey ? 'text' : 'password'}
-                      value={config.passcodeOrKey}
-                      onChange={(e) =>
-                        onUpdateConfig({ ...config, passcodeOrKey: e.target.value }, false)
-                      }
-                      onBlur={() => onUpdateConfig(config, true)}
-                      placeholder="输入私人解锁码 或 Wallhaven API Key..."
-                      className="w-full pl-3.5 pr-20 py-2.5 rounded-xl bg-black/50 border border-white/15 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-rose-400 font-mono"
-                    />
-                    <div className="absolute right-2 flex items-center gap-1">
+            {/* Password Verification Section (shown when locked or to change key) */}
+            {!isUnlocked ? (
+              <div className="space-y-3 pt-3 border-t border-white/10 animate-in fade-in duration-200">
+                <div className="p-3.5 rounded-xl bg-black/40 border border-white/10">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Lock className="w-3.5 h-3.5 text-amber-400" />
+                    <span className="text-xs font-semibold text-slate-200">
+                      开启前请输入专属访问密码：
+                    </span>
+                  </div>
+                  
+                  <div className="flex items-center gap-2">
+                    <div className="relative flex-1 flex items-center">
+                      <input
+                        type={showKey ? 'text' : 'password'}
+                        value={inputKey}
+                        onChange={(e) => {
+                          setInputKey(e.target.value);
+                          setErrorTip('');
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleVerifyAndUnlock();
+                          }
+                        }}
+                        placeholder="输入访问密码 (专属口令)..."
+                        className="w-full pl-3 pr-10 py-2 rounded-lg bg-black/60 border border-white/20 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-rose-400 font-mono"
+                      />
                       <button
                         type="button"
                         onClick={() => setShowKey(!showKey)}
-                        className="p-1.5 text-slate-400 hover:text-white cursor-pointer"
+                        className="absolute right-2 p-1 text-slate-400 hover:text-white cursor-pointer"
                       >
                         {showKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                       </button>
                     </div>
-                  </div>
 
-                  <div className="mt-2 flex items-center justify-between">
-                    {isVipUnlocked ? (
-                      <span className="inline-flex items-center gap-1.5 text-xs text-emerald-400 font-medium">
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        <span>✓ 已通过专属口令解锁全量 VIP NSFW 通道 (Wallhaven + Yande + Konachan)</span>
-                      </span>
-                    ) : hasCustomKey ? (
-                      <span className="inline-flex items-center gap-1.5 text-xs text-indigo-300 font-medium">
-                        <Unlock className="w-3.5 h-3.5" />
-                        <span>已配置自定义 API Key</span>
-                      </span>
-                    ) : (
-                      <span className="text-[11px] text-amber-300/90">
-                        提示：输入你的专属口令可一键解锁全部 R18 权限
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  {[
-                    { id: '111', label: '全量混合 (SFW + R18)', sub: '兼顾唯美与成人内容' },
-                    { id: '001', label: '纯享成人 (Pure NSFW)', sub: '仅拉取 R18 / Explicit' },
-                    { id: '110', label: '微醺性感 (Sketchy)', sub: '写真与轻度性感' },
-                  ].map((item) => (
                     <button
-                      key={item.id}
-                      onClick={() =>
-                        onUpdateConfig(
-                          { ...config, purityMode: item.id as PlayerFilterConfig['purityMode'] },
-                          true
-                        )
-                      }
-                      className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
-                        config.purityMode === item.id
-                          ? 'bg-rose-500/25 border-rose-400 text-white'
-                          : 'bg-black/40 border-white/10 text-slate-400 hover:text-white'
-                      }`}
+                      type="button"
+                      onClick={handleVerifyAndUnlock}
+                      className="px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold transition-all cursor-pointer shadow-md shrink-0"
                     >
-                      <div className="text-xs font-bold">{item.label}</div>
-                      <div className="text-[10px] opacity-75">{item.sub}</div>
+                      验证并开启
                     </button>
-                  ))}
+                  </div>
+
+                  {errorTip && (
+                    <div className="mt-2 flex items-center gap-1.5 text-xs text-rose-400 font-medium">
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                      <span>{errorTip}</span>
+                    </div>
+                  )}
+
+                  <div className="mt-2 text-[11px] text-slate-400">
+                    提示：输入专属口令可一键解锁全量成人 4K 视觉源与 R18 图库。
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4 pt-3 border-t border-white/10 animate-in fade-in duration-200">
+                <div className="flex items-center justify-between p-3 rounded-xl bg-black/40 border border-emerald-500/30">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span className="text-xs text-emerald-300 font-medium">
+                      {isVipUnlocked ? '✓ 专属口令已验证，已解锁全量 VIP 通道' : '✓ 自定义 API Key 已配置'}
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleLock}
+                    className="text-[11px] text-slate-400 hover:text-rose-300 underline cursor-pointer"
+                  >
+                    锁定并清除密码
+                  </button>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-4 text-xs text-slate-300 pt-1">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={config.enableYande}
-                      onChange={(e) =>
-                        onUpdateConfig({ ...config, enableYande: e.target.checked }, true)
-                      }
-                      className="rounded accent-rose-500"
-                    />
-                    <span>启用 Yande.re 超清源</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={config.enableKonachan}
-                      onChange={(e) =>
-                        onUpdateConfig({ ...config, enableKonachan: e.target.checked }, true)
-                      }
-                      className="rounded accent-rose-500"
-                    />
-                    <span>启用 Konachan 4K 源</span>
-                  </label>
-                </div>
+                {config.adultMode && (
+                  <>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      {[
+                        { id: '111', label: '全量混合 (SFW + R18)', sub: '兼顾唯美与成人内容' },
+                        { id: '001', label: '纯享成人 (Pure NSFW)', sub: '仅拉取 R18 / Explicit' },
+                        { id: '110', label: '微醺性感 (Sketchy)', sub: '写真与轻度性感' },
+                      ].map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() =>
+                            onUpdateConfig(
+                              { ...config, purityMode: item.id as PlayerFilterConfig['purityMode'] },
+                              true
+                            )
+                          }
+                          className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                            config.purityMode === item.id
+                              ? 'bg-rose-500/25 border-rose-400 text-white'
+                              : 'bg-black/40 border-white/10 text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          <div className="text-xs font-bold">{item.label}</div>
+                          <div className="text-[10px] opacity-75">{item.sub}</div>
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-4 text-xs text-slate-300 pt-1">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={config.enableYande}
+                          onChange={(e) =>
+                            onUpdateConfig({ ...config, enableYande: e.target.checked }, true)
+                          }
+                          className="rounded accent-rose-500"
+                        />
+                        <span>启用 Yande.re 超清源</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={config.enableKonachan}
+                          onChange={(e) =>
+                            onUpdateConfig({ ...config, enableKonachan: e.target.checked }, true)
+                          }
+                          className="rounded accent-rose-500"
+                        />
+                        <span>启用 Konachan 4K 源</span>
+                      </label>
+                    </div>
+                  </>
+                )}
               </div>
             )}
           </div>
