@@ -28,7 +28,7 @@ const VIP_PASSCODE = 'bin0sky.tech';
 const VIP_WALLHAVEN_KEY = 'MDDrRgAvmbCe7IZdeCnXxW8L06bJW85i';
 
 function randomSeed(): string {
-  const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
   let out = '';
   for (let i = 0; i < 6; i++) {
     out += chars.charAt(Math.floor(Math.random() * chars.length));
@@ -425,6 +425,7 @@ export default {
           status: 200,
           headers: {
             'Content-Type': 'application/json; charset=utf-8',
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
             ...CORS_HEADERS,
           },
         }
