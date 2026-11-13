@@ -120,11 +120,8 @@ function getCanonicalReferer(targetHost: string, protocol: string): string {
   return `${protocol}//${targetHost}/`;
 }
 
-function buildStreamProxyUrl(origin: string, rawUrl: string, targetWidth: number, quality: number = 82): string {
-  if (targetWidth <= 0) {
-    return `${origin}/api/image-proxy?url=${encodeURIComponent(rawUrl)}`;
-  }
-  return `${origin}/api/image-proxy?url=${encodeURIComponent(rawUrl)}&w=${targetWidth}&q=${quality}`;
+function buildStreamProxyUrl(origin: string, rawUrl: string, _targetWidth: number = 0, _quality: number = 82): string {
+  return `${origin}/api/image-proxy?url=${encodeURIComponent(rawUrl)}`;
 }
 
 async function fetchWallhaven(params: {
@@ -310,8 +307,8 @@ async function fetchYande(params: {
           id: `yd_${p.id}`,
           title: `Yande.re · #${p.id}`,
           category: 'anime',
-          url: buildStreamProxyUrl(origin, rawStreamSource, targetWidth, 82),
-          previewUrl: buildStreamProxyUrl(origin, rawPreview, 600, 75),
+          url: buildStreamProxyUrl(origin, targetWidth <= 0 ? rawOriginal : rawStreamSource),
+          previewUrl: buildStreamProxyUrl(origin, rawPreview),
           rawUrl: `${origin}/api/image-proxy?url=${encodeURIComponent(rawOriginal)}`,
           source: 'Yande.re',
           location: `${w}×${h} · Rating ${(p.rating || 's').toUpperCase()}`,
@@ -388,8 +385,8 @@ async function fetchKonachan(params: {
           id: `kc_${p.id}`,
           title: `Konachan · #${p.id}`,
           category: 'anime',
-          url: buildStreamProxyUrl(origin, rawStreamSource, targetWidth, 82),
-          previewUrl: buildStreamProxyUrl(origin, rawPreview, 600, 75),
+          url: buildStreamProxyUrl(origin, targetWidth <= 0 ? rawOriginal : rawStreamSource),
+          previewUrl: buildStreamProxyUrl(origin, rawPreview),
           rawUrl: `${origin}/api/image-proxy?url=${encodeURIComponent(rawOriginal)}`,
           source: 'Konachan',
           location: `${w}×${h} · Rating ${(p.rating || 's').toUpperCase()}`,
@@ -654,56 +651,16 @@ export default {
       );
     }
 
-    // 2. High-Speed Adaptive WebP Edge Image Proxy
+    // 2. Direct Edge-Cached Image Proxy (Bypasses wsrv.nl block & Cloudflare Image Resizing 429 limits)
     if (url.pathname === '/api/image-proxy') {
       const targetUrl = url.searchParams.get('url');
       if (!targetUrl || !targetUrl.startsWith('https://')) {
         return new Response('Invalid target URL', { status: 400, headers: CORS_HEADERS });
       }
 
-      const resizeW = Number(url.searchParams.get('w') || '0');
-      const quality = Number(url.searchParams.get('q') || '82');
-
       try {
-        // Strategy A: Dynamic WebP Compression & Resize via Cloudflare-backed wsrv.nl Edge Resizer
-        // Cuts 12MB PNG down to ~350KB progressive WebP for 15x faster loading!
-        if (resizeW > 0) {
-          const wsrvUrl = `https://wsrv.nl/?url=${encodeURIComponent(targetUrl)}&w=${resizeW}&q=${quality}&output=webp&il&we`;
-          const fastRes = await fetch(wsrvUrl, {
-            headers: {
-              'User-Agent':
-                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-            },
-            cf: {
-              cacheEverything: true,
-              cacheTtl: 604800,
-            },
-          } as RequestInit);
-
-          if (fastRes.ok) {
-            const headers = new Headers(CORS_HEADERS);
-            headers.set('Content-Type', fastRes.headers.get('Content-Type') || 'image/webp');
-            headers.set('Cache-Control', 'public, max-age=604800, s-maxage=604800, immutable');
-            return new Response(fastRes.body, { status: 200, headers });
-          }
-        }
-
-        // Strategy B: Fallback to Direct Origin with Canonical Referer + Cloudflare Native Image Resizing
         const parsedTarget = new URL(targetUrl);
         const canonicalReferer = getCanonicalReferer(parsedTarget.host, parsedTarget.protocol);
-
-        const cfOptions: Record<string, any> = {
-          cacheEverything: true,
-          cacheTtl: 604800,
-        };
-        if (resizeW > 0) {
-          cfOptions.image = {
-            width: resizeW,
-            quality,
-            format: 'webp',
-            fit: 'scale-down',
-          };
-        }
 
         const imgRes = await fetch(targetUrl, {
           headers: {
@@ -712,7 +669,10 @@ export default {
             Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
             Referer: canonicalReferer,
           },
-          cf: cfOptions,
+          cf: {
+            cacheEverything: true,
+            cacheTtl: 604800,
+          },
         } as RequestInit);
 
         if (!imgRes.ok) {
