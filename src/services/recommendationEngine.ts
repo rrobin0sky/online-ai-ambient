@@ -265,11 +265,13 @@ export async function verifyAdminPasscode(passcode: string): Promise<boolean> {
   const trimmed = passcode.trim();
   if (!trimmed) return false;
   try {
-    const res = await fetch('/api/sync', {
+    const res = await fetch('/api/vip/verify', {
       credentials: 'include',
       headers: { 'X-Admin-Passcode': trimmed },
     });
-    return res.ok;
+    if (!res.ok) return false;
+    const data = await res.json().catch(() => null);
+    return Boolean(data?.passcodeValid || data?.hasVipScope);
   } catch {
     return false;
   }

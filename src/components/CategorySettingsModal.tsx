@@ -113,9 +113,15 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
       return;
     }
 
+    if (isVipUnlocked || hasCustomKey) {
+      setErrorTip('');
+      onUpdateConfig({ ...config, adultMode: true }, true);
+      return;
+    }
+
     void verifyAndApplyPasscode(
       inputKey.trim(),
-      '请先在下方输入管理员专属口令并验证解锁',
+      '请先在下方输入共享访问口令并验证解锁',
       '密码不正确，无法开启成人模式'
     );
   };
@@ -369,9 +375,9 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
                   <div className="flex items-center justify-between gap-2">
                     <div className="text-xs text-slate-200">
                       {ssoAuth?.authenticated ? (
-                        <span>已登录统一账号 <strong className="text-amber-300">{ssoAuth.username}</strong>（暂未开通 <code className="text-rose-300">ambient:vip</code> 权益）</span>
+                        <span>已登录统一账号 <strong className="text-emerald-300">{ssoAuth.username}</strong> · 个人云端收藏夹同步已开启（18+ 需输入共享口令或开通 <code className="text-rose-300">ambient:vip</code>）</span>
                       ) : (
-                        <span>使用 bin0sky 统一账号免密解锁 VIP 通道与云端同步：</span>
+                        <span>登录 bin0sky 统一账号可开启个人云端收藏夹同步（VIP/管理员免密解锁 18+）：</span>
                       )}
                     </div>
                     <button
@@ -405,7 +411,7 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
                             handleVerifyAndUnlock();
                           }
                         }}
-                        placeholder="输入访问密码 (专属口令)..."
+                        placeholder="输入共享访问口令 (解锁 18+)..."
                         className="w-full pl-3 pr-10 py-2 rounded-lg bg-black/60 border border-white/20 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-rose-400 font-mono"
                       />
                       <button
@@ -453,13 +459,15 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
                     </span>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={handleLock}
-                    className="text-[11px] text-slate-400 hover:text-rose-300 underline cursor-pointer"
-                  >
-                    锁定并清除密码
-                  </button>
+                  {(isAdminUnlocked || hasCustomKey) && (
+                    <button
+                      type="button"
+                      onClick={handleLock}
+                      className="text-[11px] text-slate-400 hover:text-rose-300 underline cursor-pointer"
+                    >
+                      锁定并清除密码
+                    </button>
+                  )}
                 </div>
 
                 {config.adultMode && (

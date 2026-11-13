@@ -11,7 +11,8 @@ interface Env {
 }
 
 interface SsoAuthResult {
-  authorized: boolean;
+  authenticated: boolean;
+  hasVipScope: boolean;
   uid?: string;
   username?: string;
   role?: string;
@@ -53,36 +54,37 @@ function getCorsHeaders(request: Request): Record<string, string> {
   return headers;
 }
 
-async function verifySsoVipAccess(request: Request): Promise<SsoAuthResult> {
+async function verifySsoAuth(request: Request): Promise<SsoAuthResult> {
   const cookie = request.headers.get('Cookie') || '';
   const auth = request.headers.get('Authorization') || '';
   if (!cookie.includes('b0_token=') && !auth.toLowerCase().startsWith('bearer ')) {
-    return { authorized: false, scopes: [] };
+    return { authenticated: false, hasVipScope: false, scopes: [] };
   }
   try {
     const headers: Record<string, string> = {};
     if (cookie) headers['Cookie'] = cookie;
     if (auth) headers['Authorization'] = auth;
     const res = await fetch('https://bin0sky.tech/api/auth/me', { headers });
-    if (!res.ok) return { authorized: false, scopes: [] };
+    if (!res.ok) return { authenticated: false, hasVipScope: false, scopes: [] };
     const data = (await res.json()) as any;
-    if (!data || !data.authenticated) return { authorized: false, scopes: [] };
+    if (!data || !data.authenticated) return { authenticated: false, hasVipScope: false, scopes: [] };
     const role = data.role || data.user?.role || 'user';
     const scopes: string[] = Array.isArray(data.scopes)
       ? data.scopes
       : Array.isArray(data.user?.scopes)
       ? data.user.scopes
       : [];
-    const authorized = role === 'admin' || scopes.includes('ambient:vip');
+    const hasVipScope = role === 'admin' || scopes.includes('ambient:vip');
     return {
-      authorized,
+      authenticated: true,
+      hasVipScope,
       uid: data.uid || data.user?.uid,
       username: data.username || data.user?.username,
       role,
       scopes,
     };
   } catch {
-    return { authorized: false, scopes: [] };
+    return { authenticated: false, hasVipScope: false, scopes: [] };
   }
 }
 
@@ -413,18 +415,47 @@ export default {
     const vipPasscode = (env.VIP_PASSCODE || '').trim();
     const vipWallhavenKey = (env.VIP_WALLHAVEN_KEY || DEFAULT_WALLHAVEN_KEY).trim();
 
-    // 0. VIP / Admin Favorites & Custom Keywords Cloud Sync API (SSO ambient:vip 或 VIP_PASSCODE)
+    // 0-a. VIP / Adult Mode Passcode Verification (distinguishes VIP unlock from normal user cloud sync)
+    if (url.pathname === '/api/vip/verify') {
+      const headerKey = (request.headers.get('X-Admin-Passcode') || '').trim();
+      const queryKey = (url.searchParams.get('key') || '').trim();
+      const passcode = headerKey || queryKey;
+
+      const sso = await verifySsoAuth(request);
+      const isPasscodeAuthorized = Boolean(vipPasscode && passcode && passcode === vipPasscode);
+      const vipAuthorized = sso.hasVipScope || isPasscodeAuthorized;
+
+      return new Response(
+        JSON.stringify({
+          ok: vipAuthorized,
+          vipAuthorized,
+          passcodeValid: isPasscodeAuthorized,
+          hasVipScope: sso.hasVipScope,
+          authenticated: sso.authenticated,
+        }),
+        {
+          status: vipAuthorized ? 200 : 401,
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            ...CORS_HEADERS,
+          },
+        }
+      );
+    }
+
+    // 0-b. Favorites & Custom Keywords Cloud Sync API (All authenticated SSO users get isolated sync + VIP_PASSCODE)
     if (url.pathname === '/api/sync') {
       const headerKey = (request.headers.get('X-Admin-Passcode') || '').trim();
       const queryKey = (url.searchParams.get('key') || '').trim();
       const passcode = headerKey || queryKey;
 
-      const sso = await verifySsoVipAccess(request);
+      const sso = await verifySsoAuth(request);
       const isPasscodeAuthorized = Boolean(vipPasscode && passcode && passcode === vipPasscode);
 
-      if (!sso.authorized && !isPasscodeAuthorized) {
+      if (!sso.authenticated && !isPasscodeAuthorized) {
         return new Response(
-          JSON.stringify({ ok: false, error: 'Unauthorized: requires SSO (ambient:vip / admin) or valid VIP passcode' }),
+          JSON.stringify({ ok: false, error: 'Unauthorized: requires BinOS login or valid VIP passcode' }),
           {
             status: 401,
             headers: { 'Content-Type': 'application/json; charset=utf-8', ...CORS_HEADERS },
@@ -433,7 +464,7 @@ export default {
       }
 
       const syncKvKey =
-        sso.authorized && sso.uid && sso.role !== 'admin' ? `ambient_sync:${sso.uid}` : KV_SYNC_KEY;
+        sso.authenticated && sso.uid && sso.role !== 'admin' ? `ambient_sync:${sso.uid}` : KV_SYNC_KEY;
 
       if (!env.AMBIENT_KV) {
         return new Response(JSON.stringify({ ok: false, error: 'KV not bound' }), {
@@ -549,8 +580,8 @@ export default {
 
       let effectiveApiKey = '';
       let isAuthorized = false;
-      const sso = reqAdult ? await verifySsoVipAccess(request) : { authorized: false, scopes: [] };
-      if (sso.authorized || (vipPasscode && passcodeOrKey === vipPasscode)) {
+      const sso = reqAdult ? await verifySsoAuth(request) : { authenticated: false, hasVipScope: false, scopes: [] };
+      if (sso.hasVipScope || (vipPasscode && passcodeOrKey === vipPasscode)) {
         effectiveApiKey = vipWallhavenKey;
         isAuthorized = true;
       } else if (passcodeOrKey.length >= 16) {

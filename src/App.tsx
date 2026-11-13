@@ -19,6 +19,7 @@ import {
   loadLocalHistory,
   saveLocalHistory,
   fetchSsoAuthMe,
+  verifyAdminPasscode,
   fetchCloudSync,
   pushCloudSync,
   type SsoAuthState,
@@ -273,10 +274,13 @@ export function App() {
     });
   }, [currentWallpaper?.id]);
 
-  // VIP / Admin Cloud Sync: Pull & Merge on unlock or mount (SSO ambient:vip or VIP_PASSCODE)
+  const isVipUnlocked = isAdminUnlocked || ssoAuth.hasVipScope;
+  const isCloudSyncEnabled = isAdminUnlocked || ssoAuth.authenticated;
+
+  // Cloud Sync: Pull & Merge on unlock or mount (All authenticated SSO users OR VIP_PASSCODE)
   const handleSyncWithCloud = useCallback(
     async (passcode: string, currentFavs: WallpaperItem[], currentDeleted: string[], silent = false) => {
-      if (!passcode.trim() && !ssoAuth.hasVipScope && !isAdminUnlocked) return;
+      if (!passcode.trim() && !ssoAuth.authenticated && !isAdminUnlocked) return;
       setIsSyncingCloud(true);
       const synced = await pushCloudSync(passcode, {
         favorites: currentFavs,
@@ -284,7 +288,6 @@ export function App() {
       });
       setIsSyncingCloud(false);
       if (synced && Array.isArray(synced.favorites)) {
-        setIsAdminUnlocked(true);
         setFavorites(synced.favorites);
         saveLocalFavorites(synced.favorites);
         if (Array.isArray(synced.deletedFavoriteIds)) {
@@ -296,36 +299,29 @@ export function App() {
         }
       }
     },
-    [showToast, ssoAuth.hasVipScope, isAdminUnlocked]
+    [showToast, ssoAuth.authenticated, isAdminUnlocked]
   );
 
   useEffect(() => {
     const trimmed = filterConfig.passcodeOrKey.trim();
-    if (!trimmed && !ssoAuth.hasVipScope) {
+    if (!trimmed && !ssoAuth.authenticated) {
       setIsAdminUnlocked(false);
       return;
     }
     let cancelled = false;
-    fetchCloudSync(trimmed).then((remote) => {
-      if (cancelled) return;
-      if (remote || ssoAuth.hasVipScope) {
-        setIsAdminUnlocked(true);
-        if (remote && Array.isArray(remote.favorites) && remote.favorites.length > 0) {
-          const localFavs = loadLocalFavorites();
-          const delSet = new Set([...loadDeletedFavoriteIds(), ...(remote.deletedFavoriteIds || [])]);
-          const merged: WallpaperItem[] = [];
-          const seen = new Set<string>();
-          for (const item of [...localFavs, ...remote.favorites]) {
-            if (!item || !item.id || seen.has(item.id) || delSet.has(item.id)) continue;
-            seen.add(item.id);
-            merged.push(item);
-          }
-          setFavorites(merged);
-          saveLocalFavorites(merged);
+
+    const runCheckAndSync = async () => {
+      let passcodeOk = false;
+      if (trimmed) {
+        if (hasCustomApiKey(trimmed)) {
+          passcodeOk = false;
+        } else {
+          passcodeOk = await verifyAdminPasscode(trimmed);
         }
-      } else {
-        setIsAdminUnlocked(false);
-        if (!hasCustomApiKey(trimmed) && filterConfig.adultMode) {
+        if (cancelled) return;
+        setIsAdminUnlocked(passcodeOk);
+
+        if (!passcodeOk && !hasCustomApiKey(trimmed) && !ssoAuth.hasVipScope && filterConfig.adultMode) {
           setFilterConfig((prev) => {
             const next = { ...prev, passcodeOrKey: '', adultMode: false };
             try {
@@ -334,12 +330,34 @@ export function App() {
             return next;
           });
         }
+      } else {
+        setIsAdminUnlocked(false);
       }
-    });
+
+      if (!ssoAuth.authenticated && !passcodeOk) return;
+
+      const remote = await fetchCloudSync(passcodeOk ? trimmed : '');
+      if (cancelled) return;
+      if (remote && Array.isArray(remote.favorites) && remote.favorites.length > 0) {
+        const localFavs = loadLocalFavorites();
+        const delSet = new Set([...loadDeletedFavoriteIds(), ...(remote.deletedFavoriteIds || [])]);
+        const merged: WallpaperItem[] = [];
+        const seen = new Set<string>();
+        for (const item of [...localFavs, ...remote.favorites]) {
+          if (!item || !item.id || seen.has(item.id) || delSet.has(item.id)) continue;
+          seen.add(item.id);
+          merged.push(item);
+        }
+        setFavorites(merged);
+        saveLocalFavorites(merged);
+      }
+    };
+
+    void runCheckAndSync();
     return () => {
       cancelled = true;
     };
-  }, [filterConfig.passcodeOrKey, filterConfig.adultMode, ssoAuth.hasVipScope]);
+  }, [filterConfig.passcodeOrKey, filterConfig.adultMode, ssoAuth.authenticated, ssoAuth.hasVipScope]);
 
   // Build sliding-window preload list (next 3 items in queue)
   const preloadWallpapers = useMemo(() => {
@@ -395,7 +413,7 @@ export function App() {
       );
 
       try {
-        const isAuth = isAdminUnlocked || ssoAuth.hasVipScope || hasCustomApiKey(cfg.passcodeOrKey) || cfg.passcodeOrKey.trim().length > 0;
+        const isAuth = isVipUnlocked || hasCustomApiKey(cfg.passcodeOrKey) || cfg.passcodeOrKey.trim().length > 0;
         const effectiveAdult = cfg.adultMode && isAuth;
         let queryParam = translateQuery(cfg.customQuery);
         if (cfg.category === 'recommend') {
@@ -462,7 +480,7 @@ export function App() {
       setIsFetchingPool(false);
       isRefillingRef.current = false;
     },
-    []
+    [isVipUnlocked]
   );
 
   // Initial fetch on mount
@@ -489,7 +507,7 @@ export function App() {
     (newConfig: PlayerFilterConfig, triggerFetch: boolean = false) => {
       const sanitizedConfig: PlayerFilterConfig = {
         ...newConfig,
-        adultMode: newConfig.adultMode && (isAdminUnlocked || newConfig.passcodeOrKey.trim().length > 0),
+        adultMode: newConfig.adultMode && (isVipUnlocked || newConfig.passcodeOrKey.trim().length > 0),
       };
       setFilterConfig(sanitizedConfig);
       try {
@@ -501,7 +519,7 @@ export function App() {
         fetchCloudWallpapers(sanitizedConfig, false);
       }
     },
-    [fetchCloudWallpapers, isAdminUnlocked]
+    [fetchCloudWallpapers, isVipUnlocked]
   );
 
   // Next / Prev actions with proactive auto-fetch before pool exhausts
@@ -672,11 +690,11 @@ export function App() {
         setTimeout(() => setHeartBurst(null), 700);
       }
 
-      if (isAdminUnlocked) {
+      if (isCloudSyncEnabled) {
         handleSyncWithCloud(filterConfig.passcodeOrKey, nextFavs, nextDeleted, true);
       }
     },
-    [currentWallpaper, favorites, deletedFavIds, activeTab, filterConfig.passcodeOrKey, isAdminUnlocked, showToast, handleSyncWithCloud]
+    [currentWallpaper, favorites, deletedFavIds, activeTab, filterConfig.passcodeOrKey, isCloudSyncEnabled, showToast, handleSyncWithCloud]
   );
 
   // Batch Export Favorites to Local Directory (File System Access API or fallback)
@@ -748,7 +766,7 @@ export function App() {
             setFavorites(merged);
             saveLocalFavorites(merged);
             showToast(`✅ 成功导入并合并 ${merged.length} 张收藏壁纸`);
-            if (isAdminUnlocked) {
+            if (isCloudSyncEnabled) {
               handleSyncWithCloud(filterConfig.passcodeOrKey, merged, deletedFavIds, true);
             }
           }
@@ -758,7 +776,7 @@ export function App() {
       };
       reader.readAsText(file);
     },
-    [favorites, deletedFavIds, filterConfig.passcodeOrKey, isAdminUnlocked, showToast, handleSyncWithCloud]
+    [favorites, deletedFavIds, filterConfig.passcodeOrKey, isCloudSyncEnabled, showToast, handleSyncWithCloud]
   );
 
   // Sound change handler
@@ -915,7 +933,7 @@ export function App() {
           setUiVisible(true);
         }}
         favoritesCount={favorites.length}
-        isAdminUnlocked={isAdminUnlocked}
+        isAdminUnlocked={isCloudSyncEnabled}
         onOpenSettings={() => {
           setIsCategoryModalOpen(true);
           setUiVisible(true);
@@ -1047,7 +1065,7 @@ export function App() {
           history={history}
           favoriteIds={favoriteIds}
           filterConfig={filterConfig}
-          isAdminUnlocked={isAdminUnlocked}
+          isAdminUnlocked={isCloudSyncEnabled}
           isSyncingCloud={isSyncingCloud}
           isFetchingPool={isFetchingPool}
           onSelectCategory={handleSelectGalleryCategory}
