@@ -584,12 +584,9 @@ export default {
       if (sso.hasVipScope || (vipPasscode && passcodeOrKey === vipPasscode)) {
         effectiveApiKey = vipWallhavenKey;
         isAuthorized = true;
-      } else if (passcodeOrKey.length >= 16) {
-        effectiveApiKey = passcodeOrKey;
-        isAuthorized = true;
       }
 
-      // 强安全守卫：只有匹配环境变量 VIP_PASSCODE 或配置了有效自定义 Key，才允许启用成人模式
+      // 强安全守卫：只有 SSO (admin / ambient:vip) 或精确匹配环境变量 VIP_PASSCODE，才允许启用成人模式
       const adultMode = reqAdult && isAuthorized;
       const purityMode = adultMode ? (url.searchParams.get('purity') || '111') : '100';
 

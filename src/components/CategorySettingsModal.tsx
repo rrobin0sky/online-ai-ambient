@@ -54,8 +54,7 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
   if (!isOpen) return null;
 
   const isVipUnlocked = isAdminUnlocked || !!ssoAuth?.hasVipScope;
-  const hasCustomKey = !isVipUnlocked && config.passcodeOrKey.trim().length >= 16;
-  const isUnlocked = isVipUnlocked || hasCustomKey;
+  const isUnlocked = isVipUnlocked;
 
   const handleOpenSsoLogin = () => {
     if (window.parent && window.parent !== window) {
@@ -88,12 +87,6 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
       return;
     }
 
-    if (trimmed.length >= 16) {
-      onAdminVerified(false);
-      onUpdateConfig({ ...config, passcodeOrKey: trimmed, adultMode: true }, true);
-      return;
-    }
-
     onAdminVerified(false);
     setErrorTip(failMsg);
   };
@@ -101,8 +94,8 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
   const handleVerifyAndUnlock = () => {
     void verifyAndApplyPasscode(
       inputKey.trim(),
-      '请输入管理员专属口令',
-      '密码不正确，请输入正确的管理员专属口令'
+      '请输入共享访问口令',
+      '密码不正确，请输入正确的访问口令'
     );
   };
 
@@ -113,7 +106,7 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
       return;
     }
 
-    if (isVipUnlocked || hasCustomKey) {
+    if (isVipUnlocked) {
       setErrorTip('');
       onUpdateConfig({ ...config, adultMode: true }, true);
       return;
@@ -392,7 +385,7 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
                   <div className="border-t border-white/10 pt-2.5 flex items-center gap-2">
                     <Lock className="w-3.5 h-3.5 text-amber-400" />
                     <span className="text-xs font-semibold text-slate-200">
-                      或输入访问口令 / 自定义 Wallhaven API Key：
+                      或输入共享访问口令（解锁 18+）：
                     </span>
                   </div>
                   
@@ -453,13 +446,11 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
                     <span className="text-xs text-emerald-300 font-medium">
                       {ssoAuth?.hasVipScope
                         ? `✓ 已通过统一账号 [${ssoAuth.username}] 激活云端同步与 VIP 通道`
-                        : isVipUnlocked
-                        ? '✓ 管理员口令已验证，云端收藏夹同步与 VIP 通道已开启'
-                        : '✓ 自定义 API Key 已配置'}
+                        : '✓ 共享口令已验证，18+ 模式与云端通道已开启'}
                     </span>
                   </div>
 
-                  {(isAdminUnlocked || hasCustomKey) && (
+                  {isAdminUnlocked && (
                     <button
                       type="button"
                       onClick={handleLock}

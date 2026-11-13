@@ -39,10 +39,6 @@ const DEFAULT_FILTER_CONFIG: PlayerFilterConfig = {
   qualityMode: 'auto',
 };
 
-function hasCustomApiKey(passcodeOrKey: string): boolean {
-  return (passcodeOrKey || '').trim().length >= 16;
-}
-
 function loadSavedConfig(): PlayerFilterConfig {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -313,15 +309,11 @@ export function App() {
     const runCheckAndSync = async () => {
       let passcodeOk = false;
       if (trimmed) {
-        if (hasCustomApiKey(trimmed)) {
-          passcodeOk = false;
-        } else {
-          passcodeOk = await verifyAdminPasscode(trimmed);
-        }
+        passcodeOk = await verifyAdminPasscode(trimmed);
         if (cancelled) return;
         setIsAdminUnlocked(passcodeOk);
 
-        if (!passcodeOk && !hasCustomApiKey(trimmed) && !ssoAuth.hasVipScope && filterConfig.adultMode) {
+        if (!passcodeOk) {
           setFilterConfig((prev) => {
             const next = { ...prev, passcodeOrKey: '', adultMode: false };
             try {
@@ -413,7 +405,7 @@ export function App() {
       );
 
       try {
-        const isAuth = isVipUnlocked || hasCustomApiKey(cfg.passcodeOrKey) || cfg.passcodeOrKey.trim().length > 0;
+        const isAuth = isVipUnlocked || cfg.passcodeOrKey.trim().length > 0;
         const effectiveAdult = cfg.adultMode && isAuth;
         let queryParam = translateQuery(cfg.customQuery);
         if (cfg.category === 'recommend') {
