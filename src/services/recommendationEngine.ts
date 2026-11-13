@@ -277,13 +277,10 @@ export async function verifyAdminPasscode(passcode: string): Promise<boolean> {
   }
 }
 
-export async function fetchCloudSync(passcode: string): Promise<CloudSyncPayload | null> {
+export async function fetchCloudSync(_passcode?: string): Promise<CloudSyncPayload | null> {
   try {
-    const headers: Record<string, string> = {};
-    if (passcode.trim()) headers['X-Admin-Passcode'] = passcode.trim();
     const res = await fetch('/api/sync', {
       credentials: 'include',
-      headers,
     });
     if (!res.ok) return null;
     const json = await res.json();
@@ -294,7 +291,7 @@ export async function fetchCloudSync(passcode: string): Promise<CloudSyncPayload
 }
 
 export async function pushCloudSync(
-  passcode: string,
+  _passcode: string,
   payload: {
     favorites: WallpaperItem[];
     deletedFavoriteIds: string[];
@@ -303,12 +300,10 @@ export async function pushCloudSync(
   }
 ): Promise<CloudSyncPayload | null> {
   try {
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (passcode.trim()) headers['X-Admin-Passcode'] = passcode.trim();
     const res = await fetch('/api/sync', {
       method: 'POST',
       credentials: 'include',
-      headers,
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
     if (!res.ok) return null;

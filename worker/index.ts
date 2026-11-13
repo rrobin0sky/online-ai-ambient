@@ -444,18 +444,13 @@ export default {
       );
     }
 
-    // 0-b. Favorites & Custom Keywords Cloud Sync API (All authenticated SSO users get isolated sync + VIP_PASSCODE)
+    // 0-b. Favorites & Custom Keywords Cloud Sync API (Strictly requires authenticated BinOS SSO session)
     if (url.pathname === '/api/sync') {
-      const headerKey = (request.headers.get('X-Admin-Passcode') || '').trim();
-      const queryKey = (url.searchParams.get('key') || '').trim();
-      const passcode = headerKey || queryKey;
-
       const sso = await verifySsoAuth(request);
-      const isPasscodeAuthorized = Boolean(vipPasscode && passcode && passcode === vipPasscode);
 
-      if (!sso.authenticated && !isPasscodeAuthorized) {
+      if (!sso.authenticated || (!sso.uid && sso.role !== 'admin')) {
         return new Response(
-          JSON.stringify({ ok: false, error: 'Unauthorized: requires BinOS login or valid VIP passcode' }),
+          JSON.stringify({ ok: false, error: 'Unauthorized: cloud sync requires BinOS account login' }),
           {
             status: 401,
             headers: { 'Content-Type': 'application/json; charset=utf-8', ...CORS_HEADERS },
@@ -463,8 +458,7 @@ export default {
         );
       }
 
-      const syncKvKey =
-        sso.authenticated && sso.uid && sso.role !== 'admin' ? `ambient_sync:${sso.uid}` : KV_SYNC_KEY;
+      const syncKvKey = sso.role === 'admin' ? KV_SYNC_KEY : `ambient_sync:${sso.uid}`;
 
       if (!env.AMBIENT_KV) {
         return new Response(JSON.stringify({ ok: false, error: 'KV not bound' }), {

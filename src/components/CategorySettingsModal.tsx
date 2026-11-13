@@ -331,7 +331,7 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-bold text-white">👑 管理员登录 · 云端收藏夹同步 & 18+ 进阶模式</span>
+                    <span className="text-sm font-bold text-white">👑 云端收藏同步 & 18+ 进阶模式</span>
                     {config.adultMode && (
                       <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
                         已启用
@@ -339,7 +339,7 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
                     )}
                   </div>
                   <p className="text-[11px] text-slate-400">
-                    解锁 Cloudflare KV 云端收藏夹实时同步，以及 Wallhaven R18 / Yande.re / Konachan 全量图库
+                    登录统一账号同步个人云端收藏；输入共享口令或使用 VIP 账号解锁全量 18+ 图库
                   </p>
                 </div>
               </div>
@@ -434,7 +434,7 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
                   )}
 
                   <div className="mt-2 text-[11px] text-slate-400">
-                    提示：输入管理员专属口令可一键同步云端收藏夹，并解锁全量 4K 视觉源。
+                    提示：共享口令仅用于解锁 18+ 图库；如需多端云端同步个人收藏，请登录 bin0sky 统一账号。
                   </div>
                 </div>
               </div>
@@ -445,8 +445,10 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
                     <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
                     <span className="text-xs text-emerald-300 font-medium">
                       {ssoAuth?.hasVipScope
-                        ? `✓ 已通过统一账号 [${ssoAuth.username}] 激活云端同步与 VIP 通道`
-                        : '✓ 共享口令已验证，18+ 模式与云端通道已开启'}
+                        ? `✓ 已通过统一账号 [${ssoAuth.username}] 激活云端同步与 18+ VIP 通道`
+                        : ssoAuth?.authenticated
+                        ? `✓ 共享口令已验证，18+ 模式已开启（已绑定 [${ssoAuth.username}] 个人云端收藏）`
+                        : '✓ 共享口令已验证，18+ 模式已开启（未登录状态下收藏仅保存在本地浏览器）'}
                     </span>
                   </div>
 

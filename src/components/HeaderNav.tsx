@@ -92,8 +92,8 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
           }`}
           title={
             isAdminUnlocked
-              ? '管理员已登录 · 收藏夹已开启 Cloudflare KV 云端实时同步'
-              : '管理员登录：输入专属口令开启云端收藏夹同步与全量 18+ 图库'
+              ? '已登录统一账号 · 个人收藏夹已开启 Cloudflare KV 云端实时同步'
+              : '登录 bin0sky 统一账号开启个人云端收藏同步，或输入共享口令解锁 18+ 图库'
           }
         >
           {isAdminUnlocked ? (
@@ -104,7 +104,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
           ) : (
             <>
               <Lock className="w-3.5 h-3.5 text-amber-300" />
-              <span className="hidden md:inline">{isZh ? '管理员登录' : 'Admin Login'}</span>
+              <span className="hidden md:inline">{isZh ? '登录 / 解锁' : 'Login / Unlock'}</span>
             </>
           )}
         </button>

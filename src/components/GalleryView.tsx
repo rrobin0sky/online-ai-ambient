@@ -214,7 +214,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
             >
               <span className="flex items-center gap-1.5 truncate">
                 {isAdminUnlocked ? <Cloud className="w-3.5 h-3.5 shrink-0" /> : <Lock className="w-3.5 h-3.5 shrink-0" />}
-                <span className="truncate">{isAdminUnlocked ? '管理员云同步已开启' : '管理员登录 / 同步'}</span>
+                <span className="truncate">{isAdminUnlocked ? '个人云同步已开启' : '登录同步 / 解锁 18+'}</span>
               </span>
             </button>
 

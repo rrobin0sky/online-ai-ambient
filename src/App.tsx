@@ -271,14 +271,14 @@ export function App() {
   }, [currentWallpaper?.id]);
 
   const isVipUnlocked = isAdminUnlocked || ssoAuth.hasVipScope;
-  const isCloudSyncEnabled = isAdminUnlocked || ssoAuth.authenticated;
+  const isCloudSyncEnabled = ssoAuth.authenticated;
 
-  // Cloud Sync: Pull & Merge on unlock or mount (All authenticated SSO users OR VIP_PASSCODE)
+  // Cloud Sync: Strictly requires authenticated BinOS SSO session (passcode alone unlocks 18+ only)
   const handleSyncWithCloud = useCallback(
-    async (passcode: string, currentFavs: WallpaperItem[], currentDeleted: string[], silent = false) => {
-      if (!passcode.trim() && !ssoAuth.authenticated && !isAdminUnlocked) return;
+    async (_passcode: string, currentFavs: WallpaperItem[], currentDeleted: string[], silent = false) => {
+      if (!ssoAuth.authenticated) return;
       setIsSyncingCloud(true);
-      const synced = await pushCloudSync(passcode, {
+      const synced = await pushCloudSync('', {
         favorites: currentFavs,
         deletedFavoriteIds: currentDeleted,
       });
@@ -295,7 +295,7 @@ export function App() {
         }
       }
     },
-    [showToast, ssoAuth.authenticated, isAdminUnlocked]
+    [showToast, ssoAuth.authenticated]
   );
 
   useEffect(() => {
@@ -307,15 +307,18 @@ export function App() {
     let cancelled = false;
 
     const runCheckAndSync = async () => {
-      let passcodeOk = false;
       if (trimmed) {
-        passcodeOk = await verifyAdminPasscode(trimmed);
+        const passcodeOk = await verifyAdminPasscode(trimmed);
         if (cancelled) return;
         setIsAdminUnlocked(passcodeOk);
 
         if (!passcodeOk) {
           setFilterConfig((prev) => {
-            const next = { ...prev, passcodeOrKey: '', adultMode: false };
+            const next = {
+              ...prev,
+              passcodeOrKey: '',
+              adultMode: ssoAuth.hasVipScope ? prev.adultMode : false,
+            };
             try {
               localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
             } catch {}
@@ -326,9 +329,9 @@ export function App() {
         setIsAdminUnlocked(false);
       }
 
-      if (!ssoAuth.authenticated && !passcodeOk) return;
+      if (!ssoAuth.authenticated) return;
 
-      const remote = await fetchCloudSync(passcodeOk ? trimmed : '');
+      const remote = await fetchCloudSync();
       if (cancelled) return;
       if (remote && Array.isArray(remote.favorites) && remote.favorites.length > 0) {
         const localFavs = loadLocalFavorites();
