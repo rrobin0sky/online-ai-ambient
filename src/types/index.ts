@@ -1,4 +1,7 @@
 export type CategoryType =
+  | 'recommend'
+  | 'favorites'
+  | 'history'
   | 'all'
   | 'nature'
   | 'scifi'
@@ -23,6 +26,8 @@ export interface WallpaperItem {
   resolution?: string;
   purity?: string;
   aspectRatio?: number;
+  tags?: string[];
+  dateAdded?: number;
 }
 
 export type SoundType = 'rain' | 'fire' | 'waves' | 'forest' | 'off';
@@ -37,10 +42,22 @@ export interface SoundPreset {
 export interface PlayerFilterConfig {
   category: CategoryType;
   customQuery: string;
+  customKeywords?: string[];
   adultMode: boolean;
   purityMode: '100' | '110' | '111' | '001';
   passcodeOrKey: string;
   enableYande: boolean;
   enableKonachan: boolean;
   qualityMode: QualityMode;
+  intervalSeconds?: number;
+  enableKenBurns?: boolean;
+  preventSleep?: boolean;
+  gridColumns?: number;
+}
+
+export interface CloudSyncPayload {
+  favorites: WallpaperItem[];
+  deletedFavoriteIds?: string[];
+  customKeywords?: string[];
+  updatedAt: number;
 }

@@ -1,18 +1,34 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { Heart } from 'lucide-react';
 import { CURATED_WALLPAPERS } from './data/wallpapers';
 import { HeaderNav } from './components/HeaderNav';
 import { ClockWidget } from './components/ClockWidget';
 import { PlayerControls } from './components/PlayerControls';
-import { ShowcaseSection } from './components/ShowcaseSection';
+import { FilmstripScrubber } from './components/FilmstripScrubber';
+import { GalleryView } from './components/GalleryView';
 import { CategorySettingsModal } from './components/CategorySettingsModal';
 import { WallpaperStage, ScaleMode } from './components/WallpaperStage';
 import { soundManager } from './services/soundSynthesizer';
-import { SoundType, PlayerFilterConfig, WallpaperItem, QualityMode } from './types';
+import {
+  generatePersonalizedQueries,
+  translateQuery,
+  loadLocalFavorites,
+  saveLocalFavorites,
+  loadDeletedFavoriteIds,
+  saveDeletedFavoriteIds,
+  loadLocalHistory,
+  saveLocalHistory,
+  fetchSsoAuthMe,
+  fetchCloudSync,
+  pushCloudSync,
+  type SsoAuthState,
+} from './services/recommendationEngine';
+import { SoundType, PlayerFilterConfig, WallpaperItem, QualityMode, CategoryType } from './types';
 
 const STORAGE_KEY = 'ambient4k_web_filter_v2';
 
 const DEFAULT_FILTER_CONFIG: PlayerFilterConfig = {
-  category: 'all',
+  category: 'recommend',
   customQuery: '',
   adultMode: false,
   purityMode: '111',
@@ -22,9 +38,8 @@ const DEFAULT_FILTER_CONFIG: PlayerFilterConfig = {
   qualityMode: 'auto',
 };
 
-function isPasscodeValid(passcodeOrKey: string): boolean {
-  const trimmed = (passcodeOrKey || '').trim();
-  return trimmed === 'bin0sky.tech' || trimmed.length >= 16;
+function hasCustomApiKey(passcodeOrKey: string): boolean {
+  return (passcodeOrKey || '').trim().length >= 16;
 }
 
 function loadSavedConfig(): PlayerFilterConfig {
@@ -32,7 +47,7 @@ function loadSavedConfig(): PlayerFilterConfig {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULT_FILTER_CONFIG;
     const parsed: PlayerFilterConfig = { ...DEFAULT_FILTER_CONFIG, ...JSON.parse(raw) };
-    if (parsed.adultMode && !isPasscodeValid(parsed.passcodeOrKey)) {
+    if (parsed.adultMode && !parsed.passcodeOrKey?.trim()) {
       parsed.adultMode = false;
     }
     return parsed;
@@ -132,6 +147,18 @@ export function App() {
         const target = isZh ? 'zh' : 'en';
         setLang(target);
         document.documentElement.setAttribute('lang', isZh ? 'zh-CN' : 'en');
+      } else if (e.data.type === 'B0_AUTH_CHANGE') {
+        const role = e.data.role || (e.data.isAdmin ? 'admin' : 'guest');
+        const scopes: string[] = Array.isArray(e.data.scopes) ? e.data.scopes : [];
+        const hasVipScope = Boolean(e.data.authenticated ?? (role === 'admin' || role === 'user')) &&
+          (role === 'admin' || scopes.includes('ambient:vip'));
+        setSsoAuth({
+          authenticated: Boolean(e.data.authenticated ?? (role === 'admin' || role === 'user')),
+          username: e.data.username || '',
+          role,
+          scopes,
+          hasVipScope,
+        });
       }
     };
 
@@ -166,7 +193,7 @@ export function App() {
     };
   }, []);
 
-  const [activeTab, setActiveTab] = useState<'player' | 'showcase'>('player');
+  const [activeTab, setActiveTab] = useState<'player' | 'gallery'>('player');
   const [filterConfig, setFilterConfig] = useState<PlayerFilterConfig>(loadSavedConfig);
   const [detectedWidth, setDetectedWidth] = useState<number>(() =>
     getOptimalStreamWidth(loadSavedConfig().qualityMode)
@@ -180,6 +207,7 @@ export function App() {
   const [currentSound, setCurrentSound] = useState<SoundType>('off');
   const [volume, setVolume] = useState(0.5);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showFilmstrip, setShowFilmstrip] = useState(true);
   const [uiVisible, setUiVisible] = useState(true);
   const uiVisibleRef = useRef(uiVisible);
   useEffect(() => {
@@ -189,6 +217,42 @@ export function App() {
   const [isFetchingPool, setIsFetchingPool] = useState(false);
   const [isCurrentImageLoaded, setIsCurrentImageLoaded] = useState(false);
 
+  // Favorites, Tombstones & History State
+  const [favorites, setFavorites] = useState<WallpaperItem[]>(loadLocalFavorites);
+  const [deletedFavIds, setDeletedFavIds] = useState<string[]>(loadDeletedFavoriteIds);
+  const [history, setHistory] = useState<WallpaperItem[]>(loadLocalHistory);
+  const [isSyncingCloud, setIsSyncingCloud] = useState(false);
+
+  // Toast & Heart Burst State
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [heartBurst, setHeartBurst] = useState<{ x: number; y: number; active: boolean; isFav: boolean } | null>(null);
+  const toastTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const showToast = useCallback((msg: string) => {
+    setToastMsg(msg);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToastMsg(null), 2400);
+  }, []);
+
+  const favoriteIds = useMemo(() => new Set(favorites.map((f) => f.id)), [favorites]);
+  const [isAdminUnlocked, setIsAdminUnlocked] = useState<boolean>(false);
+  const [ssoAuth, setSsoAuth] = useState<SsoAuthState>({
+    authenticated: false,
+    username: '',
+    role: 'guest',
+    scopes: [],
+    hasVipScope: false,
+  });
+
+  useEffect(() => {
+    fetchSsoAuthMe().then((res) => setSsoAuth(res));
+    if (window.parent && window.parent !== window) {
+      try {
+        window.parent.postMessage({ type: 'B0_REQUEST_AUTH' }, '*');
+      } catch {}
+    }
+  }, []);
+
   const hideTimerRef = useRef<NodeJS.Timeout | null>(null);
   const autoPlayTimerRef = useRef<NodeJS.Timeout | null>(null);
   const isRefillingRef = useRef<boolean>(false);
@@ -197,6 +261,85 @@ export function App() {
   const seedRef = useRef<string>(Math.random().toString(36).substring(2, 8));
 
   const currentWallpaper = wallpaperPool[currentIndex] || CURATED_WALLPAPERS[0];
+  const isCurrentFavorited = currentWallpaper ? favoriteIds.has(currentWallpaper.id) : false;
+
+  // Record history footprint whenever currentWallpaper changes
+  useEffect(() => {
+    if (!currentWallpaper) return;
+    setHistory((prev) => {
+      const next = [currentWallpaper, ...prev.filter((item) => item.id !== currentWallpaper.id)].slice(0, 200);
+      saveLocalHistory(next);
+      return next;
+    });
+  }, [currentWallpaper?.id]);
+
+  // VIP / Admin Cloud Sync: Pull & Merge on unlock or mount (SSO ambient:vip or VIP_PASSCODE)
+  const handleSyncWithCloud = useCallback(
+    async (passcode: string, currentFavs: WallpaperItem[], currentDeleted: string[], silent = false) => {
+      if (!passcode.trim() && !ssoAuth.hasVipScope && !isAdminUnlocked) return;
+      setIsSyncingCloud(true);
+      const synced = await pushCloudSync(passcode, {
+        favorites: currentFavs,
+        deletedFavoriteIds: currentDeleted,
+      });
+      setIsSyncingCloud(false);
+      if (synced && Array.isArray(synced.favorites)) {
+        setIsAdminUnlocked(true);
+        setFavorites(synced.favorites);
+        saveLocalFavorites(synced.favorites);
+        if (Array.isArray(synced.deletedFavoriteIds)) {
+          setDeletedFavIds(synced.deletedFavoriteIds);
+          saveDeletedFavoriteIds(synced.deletedFavoriteIds);
+        }
+        if (!silent) {
+          showToast(`☁️ 云端收藏夹已同步 (${synced.favorites.length} 张)`);
+        }
+      }
+    },
+    [showToast, ssoAuth.hasVipScope, isAdminUnlocked]
+  );
+
+  useEffect(() => {
+    const trimmed = filterConfig.passcodeOrKey.trim();
+    if (!trimmed && !ssoAuth.hasVipScope) {
+      setIsAdminUnlocked(false);
+      return;
+    }
+    let cancelled = false;
+    fetchCloudSync(trimmed).then((remote) => {
+      if (cancelled) return;
+      if (remote || ssoAuth.hasVipScope) {
+        setIsAdminUnlocked(true);
+        if (remote && Array.isArray(remote.favorites) && remote.favorites.length > 0) {
+          const localFavs = loadLocalFavorites();
+          const delSet = new Set([...loadDeletedFavoriteIds(), ...(remote.deletedFavoriteIds || [])]);
+          const merged: WallpaperItem[] = [];
+          const seen = new Set<string>();
+          for (const item of [...localFavs, ...remote.favorites]) {
+            if (!item || !item.id || seen.has(item.id) || delSet.has(item.id)) continue;
+            seen.add(item.id);
+            merged.push(item);
+          }
+          setFavorites(merged);
+          saveLocalFavorites(merged);
+        }
+      } else {
+        setIsAdminUnlocked(false);
+        if (!hasCustomApiKey(trimmed) && filterConfig.adultMode) {
+          setFilterConfig((prev) => {
+            const next = { ...prev, passcodeOrKey: '', adultMode: false };
+            try {
+              localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+            } catch {}
+            return next;
+          });
+        }
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [filterConfig.passcodeOrKey, filterConfig.adultMode, ssoAuth.hasVipScope]);
 
   // Build sliding-window preload list (next 3 items in queue)
   const preloadWallpapers = useMemo(() => {
@@ -212,6 +355,24 @@ export function App() {
   // Fetch remote wallpapers via Cloudflare Worker API with screen-adaptive width & endless pagination
   const fetchCloudWallpapers = useCallback(
     async (cfg: PlayerFilterConfig, appendMode: boolean = false) => {
+      if (cfg.category === 'favorites') {
+        const favPool = loadLocalFavorites();
+        if (favPool.length > 0) {
+          setWallpaperPool(favPool);
+          setCurrentIndex(0);
+          setIsFetchingPool(false);
+          return;
+        }
+      } else if (cfg.category === 'history') {
+        const histPool = loadLocalHistory();
+        if (histPool.length > 0) {
+          setWallpaperPool(histPool);
+          setCurrentIndex(0);
+          setIsFetchingPool(false);
+          return;
+        }
+      }
+
       if (!appendMode) {
         setIsFetchingPool(true);
         cloudPageRef.current = 1;
@@ -224,7 +385,7 @@ export function App() {
       setDetectedWidth(streamW || 3840);
 
       const rawLocalFiltered =
-        cfg.category === 'all' || cfg.category === 'custom'
+        cfg.category === 'all' || cfg.category === 'custom' || cfg.category === 'recommend'
           ? CURATED_WALLPAPERS
           : CURATED_WALLPAPERS.filter((w) => w.category === cfg.category);
 
@@ -234,11 +395,17 @@ export function App() {
       );
 
       try {
-        const isAuth = isPasscodeValid(cfg.passcodeOrKey);
+        const isAuth = isAdminUnlocked || ssoAuth.hasVipScope || hasCustomApiKey(cfg.passcodeOrKey) || cfg.passcodeOrKey.trim().length > 0;
         const effectiveAdult = cfg.adultMode && isAuth;
+        let queryParam = translateQuery(cfg.customQuery);
+        if (cfg.category === 'recommend') {
+          const recQueries = generatePersonalizedQueries(loadLocalFavorites(), loadLocalHistory());
+          queryParam = recQueries.slice(0, 6).join(',');
+        }
+
         const params = new URLSearchParams({
           category: cfg.category,
-          q: cfg.customQuery,
+          q: queryParam,
           adult: effectiveAdult ? '1' : '0',
           purity: effectiveAdult ? cfg.purityMode : '100',
           key: cfg.passcodeOrKey.trim(),
@@ -249,7 +416,7 @@ export function App() {
           seed: seedRef.current,
         });
 
-        const res = await fetch(`/api/wallpapers?${params.toString()}`);
+        const res = await fetch(`/api/wallpapers?${params.toString()}`, { credentials: 'include' });
         if (res.ok) {
           const json = await res.json();
           if (json && Array.isArray(json.data) && json.data.length > 0) {
@@ -322,7 +489,7 @@ export function App() {
     (newConfig: PlayerFilterConfig, triggerFetch: boolean = false) => {
       const sanitizedConfig: PlayerFilterConfig = {
         ...newConfig,
-        adultMode: newConfig.adultMode && isPasscodeValid(newConfig.passcodeOrKey),
+        adultMode: newConfig.adultMode && (isAdminUnlocked || newConfig.passcodeOrKey.trim().length > 0),
       };
       setFilterConfig(sanitizedConfig);
       try {
@@ -334,7 +501,7 @@ export function App() {
         fetchCloudWallpapers(sanitizedConfig, false);
       }
     },
-    [fetchCloudWallpapers]
+    [fetchCloudWallpapers, isAdminUnlocked]
   );
 
   // Next / Prev actions with proactive auto-fetch before pool exhausts
@@ -441,32 +608,158 @@ export function App() {
     });
   }, []);
 
-  // Save current 4K wallpaper image (Direct safe download)
-  const handleSaveCurrentImage = useCallback(async () => {
-    if (!currentWallpaper) return;
-    const downloadUrl = currentWallpaper.rawUrl || currentWallpaper.url;
-    const cleanSource = (currentWallpaper.source || 'Wallpaper').replace(/[^a-zA-Z0-9]/g, '');
-    const filename = `Ambient4K_${cleanSource}_${currentWallpaper.id}.jpg`;
-    try {
-      const blob = await fetchSafeBlob(downloadUrl);
-      const blobUrl = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = blobUrl;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
-    } catch {
-      const link = document.createElement('a');
-      link.href = downloadUrl;
-      link.target = '_blank';
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+  // Save any wallpaper item (Direct safe download)
+  const handleSaveWallpaper = useCallback(
+    async (targetItem?: WallpaperItem) => {
+      const item = targetItem || currentWallpaper;
+      if (!item) return;
+      const downloadUrl = item.rawUrl || item.url;
+      const cleanSource = (item.source || 'Wallpaper').replace(/[^a-zA-Z0-9]/g, '');
+      const filename = `Ambient4K_${cleanSource}_${item.id}.jpg`;
+      showToast(`⬇️ 正在下载 4K 原图: ${filename}`);
+      try {
+        const blob = await fetchSafeBlob(downloadUrl);
+        const blobUrl = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+      } catch {
+        const link = document.createElement('a');
+        link.href = downloadUrl;
+        link.target = '_blank';
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+    },
+    [currentWallpaper, showToast]
+  );
+
+  // Favorite / Unfavorite Toggle with Heart Burst & Cloud Sync
+  const handleToggleFavorite = useCallback(
+    (targetItem?: WallpaperItem, clickPos?: { x: number; y: number }) => {
+      const item = targetItem || currentWallpaper;
+      if (!item) return;
+
+      const isAlreadyFav = favorites.some((f) => f.id === item.id);
+      let nextFavs: WallpaperItem[];
+      let nextDeleted = [...deletedFavIds];
+
+      if (isAlreadyFav) {
+        nextFavs = favorites.filter((f) => f.id !== item.id);
+        if (!nextDeleted.includes(item.id)) nextDeleted.push(item.id);
+        showToast('💔 已取消收藏');
+      } else {
+        const enriched: WallpaperItem = { ...item, dateAdded: Date.now() };
+        nextFavs = [enriched, ...favorites.filter((f) => f.id !== item.id)];
+        nextDeleted = nextDeleted.filter((id) => id !== item.id);
+        showToast('❤️ 已加入收藏夹');
+      }
+
+      setFavorites(nextFavs);
+      saveLocalFavorites(nextFavs);
+      setDeletedFavIds(nextDeleted);
+      saveDeletedFavoriteIds(nextDeleted);
+
+      if (activeTab === 'player') {
+        const pos = clickPos || { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+        setHeartBurst({ x: pos.x, y: pos.y, active: true, isFav: !isAlreadyFav });
+        setTimeout(() => setHeartBurst(null), 700);
+      }
+
+      if (isAdminUnlocked) {
+        handleSyncWithCloud(filterConfig.passcodeOrKey, nextFavs, nextDeleted, true);
+      }
+    },
+    [currentWallpaper, favorites, deletedFavIds, activeTab, filterConfig.passcodeOrKey, isAdminUnlocked, showToast, handleSyncWithCloud]
+  );
+
+  // Batch Export Favorites to Local Directory (File System Access API or fallback)
+  const handleBatchDownloadFavorites = useCallback(async () => {
+    if (favorites.length === 0) return;
+    const anyWin = window as any;
+    if (typeof anyWin.showDirectoryPicker === 'function') {
+      try {
+        const dirHandle = await anyWin.showDirectoryPicker({ mode: 'readwrite' });
+        showToast(`📂 开始批量导出 ${favorites.length} 张 4K 壁纸...`);
+        let success = 0;
+        for (const item of favorites) {
+          try {
+            const downloadUrl = item.rawUrl || item.url;
+            const blob = await fetchSafeBlob(downloadUrl);
+            const cleanSource = (item.source || 'Wallpaper').replace(/[^a-zA-Z0-9]/g, '');
+            const fileName = `Ambient4K_${cleanSource}_${item.id}.jpg`;
+            const fileHandle = await dirHandle.getFileHandle(fileName, { create: true });
+            const writable = await fileHandle.createWritable();
+            await writable.write(blob);
+            await writable.close();
+            success += 1;
+          } catch {
+            // continue next
+          }
+        }
+        showToast(`✅ 成功导出 ${success} 张 4K 壁纸至所选文件夹！`);
+        return;
+      } catch {
+        // User cancelled directory picker
+        return;
+      }
     }
-  }, [currentWallpaper]);
+    // Fallback: export JSON backup if browser doesn't support showDirectoryPicker
+    showToast('当前浏览器不支持目录直写，建议用 Chrome/Edge 或导出 JSON 备份');
+  }, [favorites, showToast]);
+
+  const handleExportFavoritesJson = useCallback(() => {
+    const blob = new Blob([JSON.stringify(favorites, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Ambient4K_Favorites_${favorites.length}.json`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    showToast(`📦 已导出 ${favorites.length} 张收藏备份`);
+  }, [favorites, showToast]);
+
+  const handleImportFavoritesJson = useCallback(
+    (file: File) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const parsed = JSON.parse(String(reader.result));
+          const list: WallpaperItem[] = Array.isArray(parsed)
+            ? parsed
+            : Array.isArray(parsed?.favorites)
+              ? parsed.favorites
+              : [];
+          if (list.length > 0) {
+            const seen = new Set<string>();
+            const merged: WallpaperItem[] = [];
+            for (const item of [...list, ...favorites]) {
+              if (item && item.id && !seen.has(item.id)) {
+                seen.add(item.id);
+                merged.push(item);
+              }
+            }
+            setFavorites(merged);
+            saveLocalFavorites(merged);
+            showToast(`✅ 成功导入并合并 ${merged.length} 张收藏壁纸`);
+            if (isAdminUnlocked) {
+              handleSyncWithCloud(filterConfig.passcodeOrKey, merged, deletedFavIds, true);
+            }
+          }
+        } catch {
+          showToast('⚠️ JSON 文件格式无法识别');
+        }
+      };
+      reader.readAsText(file);
+    },
+    [favorites, deletedFavIds, filterConfig.passcodeOrKey, isAdminUnlocked, showToast, handleSyncWithCloud]
+  );
 
   // Sound change handler
   const handleSoundChange = (sound: SoundType) => {
@@ -500,7 +793,7 @@ export function App() {
     return () => document.removeEventListener('fullscreenchange', handleFsChange);
   }, []);
 
-  // Keyboard shortcut listener
+  // Keyboard shortcut listener (Aligned with Native App: Space = Favorite, P = Play/Pause, G = Gallery)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
@@ -509,8 +802,19 @@ export function App() {
 
       if (e.code === 'Space') {
         e.preventDefault();
-        setAutoPlay((prev) => !prev);
+        handleToggleFavorite();
         extendIdleTimerIfVisible();
+      } else if (e.code === 'KeyP') {
+        e.preventDefault();
+        setAutoPlay((prev) => {
+          showToast(!prev ? '▶ 继续自动轮播' : '⏸ 已暂停轮播');
+          return !prev;
+        });
+        extendIdleTimerIfVisible();
+      } else if (e.code === 'KeyG') {
+        e.preventDefault();
+        setActiveTab((prev) => (prev === 'player' ? 'gallery' : 'player'));
+        setUiVisible(true);
       } else if (e.code === 'ArrowRight') {
         e.preventDefault();
         handleNext();
@@ -531,7 +835,7 @@ export function App() {
         extendIdleTimerIfVisible();
       } else if (e.code === 'KeyD' || e.key === 'D' || e.key === 'd') {
         e.preventDefault();
-        handleSaveCurrentImage();
+        handleSaveWallpaper();
         extendIdleTimerIfVisible();
       } else if (e.code === 'KeyC') {
         e.preventDefault();
@@ -544,7 +848,7 @@ export function App() {
       } else if (e.code === 'Escape') {
         if (isCategoryModalOpen) {
           setIsCategoryModalOpen(false);
-        } else if (activeTab === 'showcase') {
+        } else if (activeTab === 'gallery') {
           setActiveTab('player');
         }
       }
@@ -553,6 +857,7 @@ export function App() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
+    handleToggleFavorite,
     handleNext,
     handlePrev,
     extendIdleTimerIfVisible,
@@ -562,23 +867,46 @@ export function App() {
     fetchCloudWallpapers,
     filterConfig,
     toggleScaleMode,
-    handleSaveCurrentImage,
+    handleSaveWallpaper,
+    showToast,
   ]);
 
-  // Download macOS Client trigger
-  const handleDownload = () => {
-    const link = document.createElement('a');
-    link.href = '/Ambient4K_Universal_macOS13.zip';
-    link.download = 'Ambient4K_Universal_macOS13.zip';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
+  const handleSelectGalleryCategory = useCallback(
+    (cat: CategoryType) => {
+      handleUpdateConfig({ ...filterConfig, category: cat }, true);
+    },
+    [filterConfig, handleUpdateConfig]
+  );
+
+  const handlePlaySpecificWallpaper = useCallback(
+    (item: WallpaperItem) => {
+      const idx = wallpaperPool.findIndex((w) => w.id === item.id);
+      if (idx >= 0) {
+        setCurrentIndex(idx);
+      } else {
+        setWallpaperPool((prev) => [item, ...prev]);
+        setCurrentIndex(0);
+      }
+      setAutoPlay(false);
+      setActiveTab('player');
+      resetIdleTimer();
+    },
+    [wallpaperPool, resetIdleTimer]
+  );
 
   return (
-    <div className={`relative w-screen h-screen overflow-hidden select-none transition-colors duration-300 ${
-      isDark ? 'bg-slate-950 text-slate-100' : 'bg-[#f5f5f7] text-[#1d1d1f]'
-    }`}>
+    <div
+      className={`relative w-screen h-screen overflow-hidden select-none transition-colors duration-300 ${
+        isDark ? 'bg-slate-950 text-slate-100' : 'bg-[#f5f5f7] text-[#1d1d1f]'
+      }`}
+    >
+      {/* Top Toast Capsule */}
+      {toastMsg && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[60] px-4 py-2 rounded-full bg-black/75 backdrop-blur-xl border border-white/15 text-xs font-semibold text-white shadow-2xl pointer-events-none animate-in fade-in zoom-in-95 duration-200">
+          {toastMsg}
+        </div>
+      )}
+
       {/* Top Header Navigation */}
       <HeaderNav
         activeTab={activeTab}
@@ -586,8 +914,13 @@ export function App() {
           setActiveTab(tab);
           setUiVisible(true);
         }}
-        onDownloadClick={handleDownload}
-        uiVisible={activeTab === 'showcase' || uiVisible || isCategoryModalOpen}
+        favoritesCount={favorites.length}
+        isAdminUnlocked={isAdminUnlocked}
+        onOpenSettings={() => {
+          setIsCategoryModalOpen(true);
+          setUiVisible(true);
+        }}
+        uiVisible={activeTab === 'gallery' || uiVisible || isCategoryModalOpen}
         lang={lang}
       />
 
@@ -596,6 +929,9 @@ export function App() {
         className={`absolute inset-0 transition-opacity duration-700 ease-in-out ${
           activeTab === 'player' ? 'opacity-100 pointer-events-auto z-10' : 'opacity-0 pointer-events-none z-0'
         }`}
+        onDoubleClick={(e) => {
+          handleToggleFavorite(currentWallpaper, { x: e.clientX, y: e.clientY });
+        }}
         onClick={(e) => {
           const target = e.target as HTMLElement;
           if (
@@ -617,8 +953,37 @@ export function App() {
           uiVisible={uiVisible}
         />
 
+        {/* Heart Burst Animation Overlay */}
+        {heartBurst && heartBurst.active && (
+          <div
+            className="fixed z-50 pointer-events-none -translate-x-1/2 -translate-y-1/2 animate-ping"
+            style={{ left: heartBurst.x, top: heartBurst.y }}
+          >
+            <Heart
+              className={`w-20 h-20 drop-shadow-[0_0_25px_rgba(244,63,94,0.85)] ${
+                heartBurst.isFav ? 'text-rose-500 fill-rose-500' : 'text-slate-300'
+              }`}
+            />
+          </div>
+        )}
+
         {/* Ambient Clock and Date Widget */}
         <ClockWidget currentWallpaper={currentWallpaper} visible={uiVisible} />
+
+        {/* Bottom Filmstrip Scrubber (Above Player Controls) */}
+        <div className="fixed bottom-20 left-0 right-0 z-40 pointer-events-none">
+          <FilmstripScrubber
+            items={wallpaperPool}
+            currentIndex={currentIndex}
+            favoriteIds={favoriteIds}
+            onSelectIndex={(idx) => {
+              setIsCurrentImageLoaded(false);
+              setCurrentIndex(idx);
+              extendIdleTimerIfVisible();
+            }}
+            visible={(uiVisible || isCategoryModalOpen) && showFilmstrip}
+          />
+        </div>
 
         {/* Floating Player Controls Bar */}
         <PlayerControls
@@ -626,14 +991,18 @@ export function App() {
           onNext={handleNext}
           autoPlay={autoPlay}
           onToggleAutoPlay={() => setAutoPlay(!autoPlay)}
+          isCurrentFavorited={isCurrentFavorited}
+          onToggleFavorite={() => handleToggleFavorite(currentWallpaper)}
+          showFilmstrip={showFilmstrip}
+          onToggleFilmstrip={() => setShowFilmstrip((prev) => !prev)}
           currentSound={currentSound}
           onSoundChange={handleSoundChange}
           volume={volume}
           onVolumeChange={handleVolumeChange}
           isFullscreen={isFullscreen}
           onToggleFullscreen={toggleFullscreen}
-          onOpenShowcase={() => {
-            setActiveTab('showcase');
+          onOpenGallery={() => {
+            setActiveTab('gallery');
             setUiVisible(true);
           }}
           filterConfig={filterConfig}
@@ -645,14 +1014,14 @@ export function App() {
           isFetchingPool={isFetchingPool}
           scaleMode={scaleMode}
           onToggleScaleMode={toggleScaleMode}
-          onSaveCurrentImage={handleSaveCurrentImage}
+          onSaveCurrentImage={() => handleSaveWallpaper(currentWallpaper)}
           onToggleZenMode={handleToggleUi}
           uiVisible={uiVisible || isCategoryModalOpen}
           lang={lang}
         />
       </div>
 
-      {/* Category & Adult Mode Settings Modal */}
+      {/* Category & Admin Cloud Sync Settings Modal */}
       <CategorySettingsModal
         isOpen={isCategoryModalOpen}
         onClose={() => setIsCategoryModalOpen(false)}
@@ -661,15 +1030,51 @@ export function App() {
         isFetching={isFetchingPool}
         poolCount={wallpaperPool.length}
         detectedWidth={detectedWidth}
+        isAdminUnlocked={isAdminUnlocked}
+        onAdminVerified={setIsAdminUnlocked}
+        ssoAuth={ssoAuth}
       />
 
-      {/* MODE 2: CLIENT SHOWCASE & DOWNLOAD HUB */}
+      {/* MODE 2: APPLE PHOTOS STYLE MULTI-IMAGE GALLERY & FAVORITES HUB */}
       <div
-        className={`absolute inset-0 overflow-y-auto transition-opacity duration-500 ease-in-out ${
-          activeTab === 'showcase' ? 'opacity-100 pointer-events-auto z-20' : 'opacity-0 pointer-events-none z-0'
+        className={`absolute inset-0 overflow-hidden transition-opacity duration-500 ease-in-out ${
+          activeTab === 'gallery' ? 'opacity-100 pointer-events-auto z-20' : 'opacity-0 pointer-events-none z-0'
         }`}
       >
-        <ShowcaseSection onBackToPlayer={() => setActiveTab('player')} lang={lang} isDark={isDark} />
+        <GalleryView
+          items={wallpaperPool}
+          favorites={favorites}
+          history={history}
+          favoriteIds={favoriteIds}
+          filterConfig={filterConfig}
+          isAdminUnlocked={isAdminUnlocked}
+          isSyncingCloud={isSyncingCloud}
+          isFetchingPool={isFetchingPool}
+          onSelectCategory={handleSelectGalleryCategory}
+          onPlayWallpaper={handlePlaySpecificWallpaper}
+          onToggleFavorite={(item) => handleToggleFavorite(item)}
+          onDownloadWallpaper={(item) => handleSaveWallpaper(item)}
+          onRefreshCategory={() => fetchCloudWallpapers(filterConfig, false)}
+          onLoadMore={() => {
+            if (!isRefillingRef.current && !isFetchingPool) {
+              isRefillingRef.current = true;
+              fetchCloudWallpapers(filterConfig, true);
+            }
+          }}
+          onClearHistory={() => {
+            setHistory([]);
+            saveLocalHistory([]);
+            showToast('🗑️ 已清空历史足迹');
+          }}
+          onManualCloudSync={() =>
+            handleSyncWithCloud(filterConfig.passcodeOrKey, favorites, deletedFavIds, false)
+          }
+          onExportFavoritesJson={handleExportFavoritesJson}
+          onImportFavoritesJson={handleImportFavoritesJson}
+          onBatchDownloadFavorites={handleBatchDownloadFavorites}
+          onOpenSettingsModal={() => setIsCategoryModalOpen(true)}
+          onBackToPlayer={() => setActiveTab('player')}
+        />
       </div>
     </div>
   );

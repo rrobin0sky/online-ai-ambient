@@ -8,6 +8,9 @@ export interface CategoryMeta {
 }
 
 export const PRESET_CATEGORIES: CategoryMeta[] = [
+  { id: 'recommend', label: '猜你喜欢', emoji: '🔮', desc: '基于你的收藏画像与浏览偏好动态演算推荐' },
+  { id: 'favorites', label: '我的收藏', emoji: '❤️', desc: '你珍藏的 4K 壁纸库，支持管理员云端同步' },
+  { id: 'history', label: '历史足迹', emoji: '🕒', desc: '最近浏览过的 200 张壁纸记录，随时回溯' },
   { id: 'all', label: '综合臻选', emoji: '✨', desc: '全站 4K UHD 视觉精选混合轮播' },
   { id: 'nature', label: '极境风景', emoji: '🏔', desc: '极光、雪山、深海与壮丽山川' },
   { id: 'scifi', label: '科幻星际', emoji: '🚀', desc: '深空星云、赛博未来与太空漫游' },
@@ -16,7 +19,7 @@ export const PRESET_CATEGORIES: CategoryMeta[] = [
   { id: 'supercars', label: '超跑机械', emoji: '🏎', desc: '顶级超跑、空气动力学与机械美学' },
   { id: 'cityscape', label: '赛博都市', emoji: '🏙', desc: '东京雨夜、摩天楼群与霓虹街景' },
   { id: 'minimalist', label: '暗黑极简', emoji: '🖤', desc: 'OLED 纯黑、流线几何与光影极简' },
-  { id: 'custom', label: '自定义标签', emoji: '🔍', desc: '输入任意英文关键词定向探索' },
+  { id: 'custom', label: '自定义标签', emoji: '🔍', desc: '输入任意中英文关键词定向探索' },
 ];
 
 export const SUGGESTED_TAGS = [

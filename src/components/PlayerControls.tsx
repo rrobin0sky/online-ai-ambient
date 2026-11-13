@@ -11,12 +11,13 @@ import {
   Waves,
   Trees,
   SlidersHorizontal,
-  ChevronDown,
   LayoutGrid,
   RefreshCw,
   Frame,
   ImageDown,
   EyeOff,
+  Heart,
+  Film,
 } from 'lucide-react';
 import { SoundType, PlayerFilterConfig } from '../types';
 import { PRESET_CATEGORIES } from '../data/wallpapers';
@@ -27,13 +28,17 @@ interface PlayerControlsProps {
   onNext: () => void;
   autoPlay: boolean;
   onToggleAutoPlay: () => void;
+  isCurrentFavorited: boolean;
+  onToggleFavorite: () => void;
+  showFilmstrip: boolean;
+  onToggleFilmstrip: () => void;
   currentSound: SoundType;
   onSoundChange: (sound: SoundType) => void;
   volume: number;
   onVolumeChange: (vol: number) => void;
   isFullscreen: boolean;
   onToggleFullscreen: () => void;
-  onOpenShowcase: () => void;
+  onOpenGallery: () => void;
   filterConfig: PlayerFilterConfig;
   onOpenCategoryModal: () => void;
   onRefreshPool: () => void;
@@ -47,6 +52,9 @@ interface PlayerControlsProps {
 }
 
 const CATEGORY_LABELS_EN: Record<string, string> = {
+  recommend: 'For You',
+  favorites: 'Favorites',
+  history: 'History',
   all: 'Featured',
   nature: 'Nature',
   scifi: 'Sci-Fi',
@@ -63,13 +71,17 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   onNext,
   autoPlay,
   onToggleAutoPlay,
+  isCurrentFavorited,
+  onToggleFavorite,
+  showFilmstrip,
+  onToggleFilmstrip,
   currentSound,
   onSoundChange,
   volume,
   onVolumeChange,
   isFullscreen,
   onToggleFullscreen,
-  onOpenShowcase,
+  onOpenGallery,
   filterConfig,
   onOpenCategoryModal,
   onRefreshPool,
@@ -215,7 +227,21 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
 
         <div className="h-4 w-[1px] bg-white/10 shrink-0" />
 
-        {/* Auto play status */}
+        {/* Favorite Heart Button (Space / Double-Click) */}
+        <button
+          onClick={onToggleFavorite}
+          className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-all cursor-pointer shrink-0 ${
+            isCurrentFavorited
+              ? 'bg-rose-500/25 text-rose-300 border border-rose-500/40'
+              : 'text-slate-300 hover:text-white hover:bg-white/10 border border-transparent'
+          }`}
+          title={isZh ? '收藏 / 取消收藏当前壁纸 (Space 键 / 双击画面)' : 'Favorite / Unfavorite (Space / Double-click)'}
+        >
+          <Heart className={`w-3.5 h-3.5 ${isCurrentFavorited ? 'fill-rose-500 text-rose-500' : ''}`} />
+          <span className="hidden sm:inline">{isCurrentFavorited ? (isZh ? '已收藏' : 'Saved') : (isZh ? '收藏' : 'Like')}</span>
+        </button>
+
+        {/* Auto play status (P key) */}
         <button
           onClick={onToggleAutoPlay}
           className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all cursor-pointer shrink-0 ${
@@ -223,7 +249,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
               ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
               : 'text-slate-400 hover:text-slate-200 hover:bg-white/5 border border-transparent'
           }`}
-          title={isZh ? "自动轮播切换 (Space 键)" : "Toggle autoplay (Space)"}
+          title={isZh ? '自动轮播切换 (按 P 键)' : 'Toggle autoplay (Key: P)'}
         >
           <span className={`w-1.5 h-1.5 rounded-full ${autoPlay ? 'bg-emerald-400 animate-ping' : 'bg-slate-500'}`} />
           <span className="hidden sm:inline">{autoPlay ? (isZh ? '轮播中' : 'Playing') : (isZh ? '已暂停' : 'Paused')}</span>
@@ -237,7 +263,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
               ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
               : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
           }`}
-          title={isZh ? "环境白噪音" : "Soundscape"}
+          title={isZh ? '环境白噪音' : 'Soundscape'}
         >
           <SlidersHorizontal className="w-3.5 h-3.5" />
           <span className="hidden md:inline">
@@ -249,11 +275,22 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
 
         <div className="h-4 w-[1px] bg-white/10 shrink-0" />
 
+        {/* Filmstrip Scrubber Toggle */}
+        <button
+          onClick={onToggleFilmstrip}
+          className={`p-2 rounded-full transition-colors cursor-pointer shrink-0 ${
+            showFilmstrip ? 'text-indigo-300 bg-indigo-500/20' : 'text-slate-300 hover:text-white hover:bg-white/10'
+          }`}
+          title={isZh ? '展开/收起底部多图胶片预览条' : 'Toggle Filmstrip Preview'}
+        >
+          <Film className="w-4 h-4" />
+        </button>
+
         {/* Save Current Wallpaper Image */}
         <button
           onClick={onSaveCurrentImage}
           className="p-2 rounded-full text-slate-300 hover:text-white hover:bg-white/10 transition-colors cursor-pointer shrink-0"
-          title={isZh ? "下载保存当前 4K 原图 (按 D 键)" : "Download current 4K wallpaper (Key: D)"}
+          title={isZh ? '下载保存当前 4K 原图 (按 D 键)' : 'Download current 4K wallpaper (Key: D)'}
         >
           <ImageDown className="w-4 h-4" />
         </button>
@@ -263,7 +300,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
           <button
             onClick={onToggleZenMode}
             className="p-2 rounded-full text-slate-300 hover:text-white hover:bg-white/10 transition-colors cursor-pointer shrink-0"
-            title={isZh ? "纯净看图：隐藏所有控制菜单与时钟 (按 H 键)" : "Zen Mode: Hide all UI and clock (Key: H)"}
+            title={isZh ? '纯净看图：隐藏所有控制菜单与时钟 (按 H 键)' : 'Zen Mode: Hide all UI and clock (Key: H)'}
           >
             <EyeOff className="w-4 h-4" />
           </button>
@@ -273,19 +310,19 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
         <button
           onClick={onToggleFullscreen}
           className="p-2 rounded-full text-slate-300 hover:text-white hover:bg-white/10 transition-colors cursor-pointer shrink-0"
-          title={isZh ? "全屏切换 (按 F 键)" : "Toggle Fullscreen (Key: F)"}
+          title={isZh ? '全屏切换 (按 F 键)' : 'Toggle Fullscreen (Key: F)'}
         >
           {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
         </button>
 
-        {/* Showcase Drawer Trigger */}
+        {/* Open Gallery Trigger */}
         <button
-          onClick={onOpenShowcase}
+          onClick={onOpenGallery}
           className="flex items-center gap-1 pl-1 text-xs text-indigo-300 hover:text-indigo-200 cursor-pointer font-medium shrink-0"
-          title={isZh ? "查看 macOS 原生桌面版特性" : "Explore macOS Desktop App"}
+          title={isZh ? '进入多图探索画廊 (按 G 键)' : 'Open Multi-Image Gallery (Key: G)'}
         >
-          <span className="hidden lg:inline">{isZh ? '客户端' : 'Mac App'}</span>
-          <ChevronDown className="w-3.5 h-3.5 animate-bounce" />
+          <LayoutGrid className="w-3.5 h-3.5" />
+          <span className="hidden lg:inline">{isZh ? '画廊' : 'Gallery'}</span>
         </button>
       </div>
     </div>

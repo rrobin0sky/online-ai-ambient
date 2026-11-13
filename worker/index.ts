@@ -1,7 +1,21 @@
-export interface Env {
+interface Env {
   ASSETS: {
     fetch: (req: Request) => Promise<Response>;
   };
+  AMBIENT_KV?: {
+    get: (key: string) => Promise<string | null>;
+    put: (key: string, value: string) => Promise<void>;
+  };
+  VIP_PASSCODE?: string;
+  VIP_WALLHAVEN_KEY?: string;
+}
+
+interface SsoAuthResult {
+  authorized: boolean;
+  uid?: string;
+  username?: string;
+  role?: string;
+  scopes: string[];
 }
 
 interface UnifiedWallpaper {
@@ -16,16 +30,64 @@ interface UnifiedWallpaper {
   resolution?: string;
   purity?: string;
   aspectRatio?: number;
+  tags?: string[];
+  dateAdded?: number;
 }
 
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
-};
+function getCorsHeaders(request: Request): Record<string, string> {
+  const origin = request.headers.get('Origin') || '';
+  const allowed =
+    origin === 'https://bin0sky.tech' ||
+    /^https:\/\/[a-z0-9-]+\.bin0sky\.tech$/i.test(origin) ||
+    /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
 
-const VIP_PASSCODE = 'bin0sky.tech';
-const VIP_WALLHAVEN_KEY = 'MDDrRgAvmbCe7IZdeCnXxW8L06bJW85i';
+  const headers: Record<string, string> = {
+    'Access-Control-Allow-Origin': allowed ? origin : '*',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Admin-Passcode',
+  };
+  if (allowed) {
+    headers['Access-Control-Allow-Credentials'] = 'true';
+    headers['Vary'] = 'Origin';
+  }
+  return headers;
+}
+
+async function verifySsoVipAccess(request: Request): Promise<SsoAuthResult> {
+  const cookie = request.headers.get('Cookie') || '';
+  const auth = request.headers.get('Authorization') || '';
+  if (!cookie.includes('b0_token=') && !auth.toLowerCase().startsWith('bearer ')) {
+    return { authorized: false, scopes: [] };
+  }
+  try {
+    const headers: Record<string, string> = {};
+    if (cookie) headers['Cookie'] = cookie;
+    if (auth) headers['Authorization'] = auth;
+    const res = await fetch('https://bin0sky.tech/api/auth/me', { headers });
+    if (!res.ok) return { authorized: false, scopes: [] };
+    const data = (await res.json()) as any;
+    if (!data || !data.authenticated) return { authorized: false, scopes: [] };
+    const role = data.role || data.user?.role || 'user';
+    const scopes: string[] = Array.isArray(data.scopes)
+      ? data.scopes
+      : Array.isArray(data.user?.scopes)
+      ? data.user.scopes
+      : [];
+    const authorized = role === 'admin' || scopes.includes('ambient:vip');
+    return {
+      authorized,
+      uid: data.uid || data.user?.uid,
+      username: data.username || data.user?.username,
+      role,
+      scopes,
+    };
+  } catch {
+    return { authorized: false, scopes: [] };
+  }
+}
+
+const DEFAULT_WALLHAVEN_KEY = 'MDDrRgAvmbCe7IZdeCnXxW8L06bJW85i';
+const KV_SYNC_KEY = 'admin_sync_v1';
 
 function randomSeed(): string {
   const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
@@ -79,16 +141,17 @@ async function fetchWallhaven(params: {
     const catConfig = CATEGORY_MAP[category] || CATEGORY_MAP.all;
 
     let queryStr = '';
-    if (category === 'custom' && customQuery.trim()) {
-      queryStr = customQuery.trim();
+    if ((category === 'custom' || category === 'recommend') && customQuery.trim()) {
+      const candidates = customQuery.split(',').map((s) => s.trim()).filter(Boolean);
+      queryStr = candidates[(Math.max(1, page) - 1) % candidates.length] || customQuery.trim();
     } else if (catConfig.keywords.length > 0 && catConfig.keywords[0] !== '') {
       const idx = Math.max(0, page - 1) % catConfig.keywords.length;
       queryStr = catConfig.keywords[idx];
     }
 
     let catBitmask = catConfig.categories;
-    if (category === 'custom') catBitmask = '111';
-    if (adultMode && (category === 'beauty' || category === 'all')) {
+    if (category === 'custom' || category === 'recommend') catBitmask = '111';
+    if (adultMode && (category === 'beauty' || category === 'all' || category === 'recommend')) {
       catBitmask = category === 'beauty' ? '001' : '111';
     } else if (adultMode && category === 'anime') {
       catBitmask = '010';
@@ -114,13 +177,15 @@ async function fetchWallhaven(params: {
         searchUrl.searchParams.set('q', queryStr);
       }
     }
-    const finalApiKey = (apiKey && adultMode) ? apiKey : VIP_WALLHAVEN_KEY;
-    searchUrl.searchParams.set('apikey', finalApiKey);
+    const finalApiKey = (apiKey && adultMode) ? apiKey : DEFAULT_WALLHAVEN_KEY;
+    if (finalApiKey) {
+      searchUrl.searchParams.set('apikey', finalApiKey);
+    }
 
     let res = await fetch(searchUrl.toString(), {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-        'X-API-Key': finalApiKey,
+        ...(finalApiKey ? { 'X-API-Key': finalApiKey } : {}),
       },
     });
 
@@ -168,6 +233,7 @@ async function fetchWallhaven(params: {
           resolution: item.resolution,
           purity: item.purity,
           aspectRatio: w / h,
+          tags: [item.category || 'general', ...(queryStr ? queryStr.split(/\s+/) : [])].filter(Boolean),
         };
       });
   } catch {
@@ -186,7 +252,7 @@ async function fetchYande(params: {
 }): Promise<UnifiedWallpaper[]> {
   try {
     const { category, customQuery, adultMode, purityMode, origin, targetWidth, page } = params;
-    if (category !== 'anime' && category !== 'all' && category !== 'custom' && !adultMode) {
+    if (category !== 'anime' && category !== 'all' && category !== 'custom' && category !== 'recommend' && !adultMode) {
       return [];
     }
 
@@ -234,6 +300,9 @@ async function fetchYande(params: {
         const rawPreview = p.preview_url || rawStreamSource;
         const w = Number(p.width) || 2560;
         const h = Number(p.height) || 1440;
+        const parsedTags = typeof p.tags === 'string'
+          ? p.tags.split(/\s+/).map((t: string) => t.replace(/_/g, ' ')).filter(Boolean).slice(0, 20)
+          : ['anime'];
 
         return {
           id: `yd_${p.id}`,
@@ -246,6 +315,7 @@ async function fetchYande(params: {
           location: `${w}×${h} · Rating ${(p.rating || 's').toUpperCase()}`,
           resolution: `${w}x${h}`,
           aspectRatio: w / h,
+          tags: parsedTags,
         };
       });
   } catch {
@@ -263,7 +333,7 @@ async function fetchKonachan(params: {
 }): Promise<UnifiedWallpaper[]> {
   try {
     const { category, adultMode, purityMode, origin, targetWidth, page } = params;
-    if (category !== 'anime' && category !== 'all' && !adultMode) {
+    if (category !== 'anime' && category !== 'all' && category !== 'recommend' && !adultMode) {
       return [];
     }
 
@@ -308,6 +378,9 @@ async function fetchKonachan(params: {
         const rawPreview = p.preview_url || rawStreamSource;
         const w = Number(p.width) || 2560;
         const h = Number(p.height) || 1440;
+        const parsedTags = typeof p.tags === 'string'
+          ? p.tags.split(/\s+/).map((t: string) => t.replace(/_/g, ' ')).filter(Boolean).slice(0, 20)
+          : ['anime'];
 
         return {
           id: `kc_${p.id}`,
@@ -320,6 +393,7 @@ async function fetchKonachan(params: {
           location: `${w}×${h} · Rating ${(p.rating || 's').toUpperCase()}`,
           resolution: `${w}x${h}`,
           aspectRatio: w / h,
+          tags: parsedTags,
         };
       });
   } catch {
@@ -330,9 +404,135 @@ async function fetchKonachan(params: {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    const CORS_HEADERS = getCorsHeaders(request);
 
     if (request.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: CORS_HEADERS });
+    }
+
+    const vipPasscode = (env.VIP_PASSCODE || '').trim();
+    const vipWallhavenKey = (env.VIP_WALLHAVEN_KEY || DEFAULT_WALLHAVEN_KEY).trim();
+
+    // 0. VIP / Admin Favorites & Custom Keywords Cloud Sync API (SSO ambient:vip 或 VIP_PASSCODE)
+    if (url.pathname === '/api/sync') {
+      const headerKey = (request.headers.get('X-Admin-Passcode') || '').trim();
+      const queryKey = (url.searchParams.get('key') || '').trim();
+      const passcode = headerKey || queryKey;
+
+      const sso = await verifySsoVipAccess(request);
+      const isPasscodeAuthorized = Boolean(vipPasscode && passcode && passcode === vipPasscode);
+
+      if (!sso.authorized && !isPasscodeAuthorized) {
+        return new Response(
+          JSON.stringify({ ok: false, error: 'Unauthorized: requires SSO (ambient:vip / admin) or valid VIP passcode' }),
+          {
+            status: 401,
+            headers: { 'Content-Type': 'application/json; charset=utf-8', ...CORS_HEADERS },
+          }
+        );
+      }
+
+      const syncKvKey =
+        sso.authorized && sso.uid && sso.role !== 'admin' ? `ambient_sync:${sso.uid}` : KV_SYNC_KEY;
+
+      if (!env.AMBIENT_KV) {
+        return new Response(JSON.stringify({ ok: false, error: 'KV not bound' }), {
+          status: 503,
+          headers: { 'Content-Type': 'application/json; charset=utf-8', ...CORS_HEADERS },
+        });
+      }
+
+      if (request.method === 'GET') {
+        const raw = await env.AMBIENT_KV.get(syncKvKey);
+        const parsed = raw
+          ? JSON.parse(raw)
+          : { favorites: [], deletedFavoriteIds: [], customKeywords: [], updatedAt: Date.now() };
+        return new Response(JSON.stringify({ ok: true, data: parsed }), {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            ...CORS_HEADERS,
+          },
+        });
+      }
+
+      if (request.method === 'POST') {
+        try {
+          const incoming = (await request.json()) as {
+            favorites?: UnifiedWallpaper[];
+            deletedFavoriteIds?: string[];
+            customKeywords?: string[];
+            replaceAll?: boolean;
+          };
+
+          const existingRaw = await env.AMBIENT_KV.get(syncKvKey);
+          const existing = existingRaw
+            ? JSON.parse(existingRaw)
+            : { favorites: [], deletedFavoriteIds: [], customKeywords: [], updatedAt: 0 };
+
+          if (incoming.replaceAll) {
+            const payload = {
+              favorites: Array.isArray(incoming.favorites) ? incoming.favorites : [],
+              deletedFavoriteIds: Array.isArray(incoming.deletedFavoriteIds) ? incoming.deletedFavoriteIds : [],
+              customKeywords: Array.isArray(incoming.customKeywords)
+                ? incoming.customKeywords
+                : existing.customKeywords || [],
+              updatedAt: Date.now(),
+            };
+            await env.AMBIENT_KV.put(syncKvKey, JSON.stringify(payload));
+            return new Response(JSON.stringify({ ok: true, data: payload }), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json; charset=utf-8', ...CORS_HEADERS },
+            });
+          }
+
+          // Smart Tombstone-Aware Merge
+          const deletedSet = new Set<string>([
+            ...(Array.isArray(existing.deletedFavoriteIds) ? existing.deletedFavoriteIds : []),
+            ...(Array.isArray(incoming.deletedFavoriteIds) ? incoming.deletedFavoriteIds : []),
+          ]);
+
+          const incomingFavs = Array.isArray(incoming.favorites) ? incoming.favorites : [];
+          // If an item is explicitly in incoming.favorites, un-tombstone it if recently added
+          const incomingIds = new Set(incomingFavs.map((f) => f.id));
+
+          const mergedFavs: UnifiedWallpaper[] = [];
+          const seenIds = new Set<string>();
+
+          for (const item of [...incomingFavs, ...(Array.isArray(existing.favorites) ? existing.favorites : [])]) {
+            if (!item || !item.id || seenIds.has(item.id)) continue;
+            if (deletedSet.has(item.id) && !incomingIds.has(item.id)) continue;
+            if (Array.isArray(incoming.deletedFavoriteIds) && incoming.deletedFavoriteIds.includes(item.id)) {
+              continue;
+            }
+            seenIds.add(item.id);
+            mergedFavs.push(item);
+          }
+
+          const mergedKeywords = Array.isArray(incoming.customKeywords)
+            ? incoming.customKeywords
+            : existing.customKeywords || [];
+
+          const payload = {
+            favorites: mergedFavs,
+            deletedFavoriteIds: Array.from(deletedSet).slice(-500),
+            customKeywords: mergedKeywords,
+            updatedAt: Date.now(),
+          };
+
+          await env.AMBIENT_KV.put(syncKvKey, JSON.stringify(payload));
+          return new Response(JSON.stringify({ ok: true, data: payload }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json; charset=utf-8', ...CORS_HEADERS },
+          });
+        } catch (err: any) {
+          return new Response(JSON.stringify({ ok: false, error: err?.message || 'Sync failed' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json; charset=utf-8', ...CORS_HEADERS },
+          });
+        }
+      }
     }
 
     // 1. Wallpaper Discovery & Search API
@@ -349,15 +549,16 @@ export default {
 
       let effectiveApiKey = '';
       let isAuthorized = false;
-      if (passcodeOrKey === VIP_PASSCODE) {
-        effectiveApiKey = VIP_WALLHAVEN_KEY;
+      const sso = reqAdult ? await verifySsoVipAccess(request) : { authorized: false, scopes: [] };
+      if (sso.authorized || (vipPasscode && passcodeOrKey === vipPasscode)) {
+        effectiveApiKey = vipWallhavenKey;
         isAuthorized = true;
       } else if (passcodeOrKey.length >= 16) {
         effectiveApiKey = passcodeOrKey;
         isAuthorized = true;
       }
 
-      // 强安全守卫：只有密码完全正确 (bin0sky.tech) 或配置了有效 Key，才允许启用成人模式
+      // 强安全守卫：只有匹配环境变量 VIP_PASSCODE 或配置了有效自定义 Key，才允许启用成人模式
       const adultMode = reqAdult && isAuthorized;
       const purityMode = adultMode ? (url.searchParams.get('purity') || '111') : '100';
 
@@ -377,7 +578,7 @@ export default {
         }),
       ];
 
-      if ((adultMode || category === 'anime' || category === 'all') && enableYande) {
+      if ((adultMode || category === 'anime' || category === 'all' || category === 'recommend') && enableYande) {
         tasks.push(
           fetchYande({
             category,
@@ -391,7 +592,7 @@ export default {
         );
       }
 
-      if ((adultMode || category === 'anime' || category === 'all') && enableKonachan) {
+      if ((adultMode || category === 'anime' || category === 'all' || category === 'recommend') && enableKonachan) {
         tasks.push(
           fetchKonachan({
             category,

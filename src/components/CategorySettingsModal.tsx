@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { PlayerFilterConfig, CategoryType, QualityMode } from '../types';
 import { PRESET_CATEGORIES, SUGGESTED_TAGS } from '../data/wallpapers';
+import { verifyAdminPasscode, type SsoAuthState } from '../services/recommendationEngine';
 
 interface CategorySettingsModalProps {
   isOpen: boolean;
@@ -23,6 +24,9 @@ interface CategorySettingsModalProps {
   isFetching: boolean;
   poolCount: number;
   detectedWidth: number;
+  isAdminUnlocked: boolean;
+  onAdminVerified: (verified: boolean) => void;
+  ssoAuth?: SsoAuthState;
 }
 
 export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
@@ -33,10 +37,14 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
   isFetching,
   poolCount,
   detectedWidth,
+  isAdminUnlocked,
+  onAdminVerified,
+  ssoAuth,
 }) => {
   const [showKey, setShowKey] = useState(false);
   const [inputKey, setInputKey] = useState(config.passcodeOrKey);
   const [errorTip, setErrorTip] = useState('');
+  const [isVerifying, setIsVerifying] = useState(false);
 
   // Sync internal state when config changes
   useEffect(() => {
@@ -45,18 +53,57 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
 
   if (!isOpen) return null;
 
-  const isVipUnlocked = config.passcodeOrKey.trim() === 'bin0sky.tech';
+  const isVipUnlocked = isAdminUnlocked || !!ssoAuth?.hasVipScope;
   const hasCustomKey = !isVipUnlocked && config.passcodeOrKey.trim().length >= 16;
   const isUnlocked = isVipUnlocked || hasCustomKey;
 
-  const handleVerifyAndUnlock = () => {
-    const trimmed = inputKey.trim();
-    if (trimmed === 'bin0sky.tech' || trimmed.length >= 16) {
-      setErrorTip('');
-      onUpdateConfig({ ...config, passcodeOrKey: trimmed, adultMode: true }, true);
-    } else {
-      setErrorTip(trimmed ? '密码不正确，请输入正确的访问密码' : '请输入访问密码');
+  const handleOpenSsoLogin = () => {
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage(
+        {
+          type: 'B0_OPEN_LOGIN',
+          reason: '使用 bin0sky 统一账号登录（需管理员或 ambient:vip 权限），即可同步云端收藏夹并解锁 4K VIP 源',
+        },
+        '*'
+      );
+      return;
     }
+    const loginBase = /(^|\.)bin0sky\.tech$/i.test(window.location.hostname) ? 'https://bin0sky.tech' : '';
+    window.location.href = `${loginBase}/#login?redirect_uri=${encodeURIComponent(window.location.href)}`;
+  };
+
+  const verifyAndApplyPasscode = async (trimmed: string, emptyMsg: string, failMsg: string) => {
+    if (!trimmed) {
+      setErrorTip(emptyMsg);
+      return;
+    }
+    setIsVerifying(true);
+    setErrorTip('');
+    const verifiedAdmin = await verifyAdminPasscode(trimmed);
+    setIsVerifying(false);
+
+    if (verifiedAdmin) {
+      onAdminVerified(true);
+      onUpdateConfig({ ...config, passcodeOrKey: trimmed, adultMode: true }, true);
+      return;
+    }
+
+    if (trimmed.length >= 16) {
+      onAdminVerified(false);
+      onUpdateConfig({ ...config, passcodeOrKey: trimmed, adultMode: true }, true);
+      return;
+    }
+
+    onAdminVerified(false);
+    setErrorTip(failMsg);
+  };
+
+  const handleVerifyAndUnlock = () => {
+    void verifyAndApplyPasscode(
+      inputKey.trim(),
+      '请输入管理员专属口令',
+      '密码不正确，请输入正确的管理员专属口令'
+    );
   };
 
   const handleToggleAdultMode = () => {
@@ -66,18 +113,17 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
       return;
     }
 
-    const trimmed = inputKey.trim();
-    if (trimmed === 'bin0sky.tech' || trimmed.length >= 16) {
-      setErrorTip('');
-      onUpdateConfig({ ...config, passcodeOrKey: trimmed, adultMode: true }, true);
-    } else {
-      setErrorTip(trimmed ? '密码不正确，无法开启成人模式' : '请先在下方输入访问密码并验证解锁');
-    }
+    void verifyAndApplyPasscode(
+      inputKey.trim(),
+      '请先在下方输入管理员专属口令并验证解锁',
+      '密码不正确，无法开启成人模式'
+    );
   };
 
   const handleLock = () => {
     setInputKey('');
     setErrorTip('');
+    onAdminVerified(false);
     onUpdateConfig({ ...config, passcodeOrKey: '', adultMode: false }, true);
   };
 
@@ -286,7 +332,7 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-bold text-white">🔞 成人 / NSFW 进阶模式</span>
+                    <span className="text-sm font-bold text-white">👑 管理员登录 · 云端收藏夹同步 & 18+ 进阶模式</span>
                     {config.adultMode && (
                       <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
                         已启用
@@ -294,7 +340,7 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
                     )}
                   </div>
                   <p className="text-[11px] text-slate-400">
-                    解锁 Wallhaven R18、Yande.re 与 Konachan 超高清无删减图库
+                    解锁 Cloudflare KV 云端收藏夹实时同步，以及 Wallhaven R18 / Yande.re / Konachan 全量图库
                   </p>
                 </div>
               </div>
@@ -316,14 +362,31 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
               </button>
             </div>
 
-            {/* Password Verification Section (shown when locked or to change key) */}
+            {/* SSO Login & Password Verification Section (shown when locked or to change key) */}
             {!isUnlocked ? (
               <div className="space-y-3 pt-3 border-t border-white/10 animate-in fade-in duration-200">
-                <div className="p-3.5 rounded-xl bg-black/40 border border-white/10">
-                  <div className="flex items-center gap-2 mb-2">
+                <div className="p-3.5 rounded-xl bg-black/40 border border-white/10 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-xs text-slate-200">
+                      {ssoAuth?.authenticated ? (
+                        <span>已登录统一账号 <strong className="text-amber-300">{ssoAuth.username}</strong>（暂未开通 <code className="text-rose-300">ambient:vip</code> 权益）</span>
+                      ) : (
+                        <span>使用 bin0sky 统一账号免密解锁 VIP 通道与云端同步：</span>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleOpenSsoLogin}
+                      className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-all cursor-pointer shrink-0"
+                    >
+                      {ssoAuth?.authenticated ? '切换授权账号' : '统一账号登录 (SSO)'}
+                    </button>
+                  </div>
+
+                  <div className="border-t border-white/10 pt-2.5 flex items-center gap-2">
                     <Lock className="w-3.5 h-3.5 text-amber-400" />
                     <span className="text-xs font-semibold text-slate-200">
-                      开启前请输入专属访问密码：
+                      或输入访问口令 / 自定义 Wallhaven API Key：
                     </span>
                   </div>
                   
@@ -357,9 +420,10 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
                     <button
                       type="button"
                       onClick={handleVerifyAndUnlock}
-                      className="px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold transition-all cursor-pointer shadow-md shrink-0"
+                      disabled={isVerifying}
+                      className="px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold transition-all cursor-pointer shadow-md shrink-0 disabled:opacity-50"
                     >
-                      验证并开启
+                      {isVerifying ? '校验中...' : '验证并开启'}
                     </button>
                   </div>
 
@@ -371,7 +435,7 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
                   )}
 
                   <div className="mt-2 text-[11px] text-slate-400">
-                    提示：输入专属口令可一键解锁全量成人 4K 视觉源与 R18 图库。
+                    提示：输入管理员专属口令可一键同步云端收藏夹，并解锁全量 4K 视觉源。
                   </div>
                 </div>
               </div>
@@ -381,7 +445,11 @@ export const CategorySettingsModal: React.FC<CategorySettingsModalProps> = ({
                   <div className="flex items-center gap-2">
                     <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
                     <span className="text-xs text-emerald-300 font-medium">
-                      {isVipUnlocked ? '✓ 专属口令已验证，已解锁全量 VIP 通道' : '✓ 自定义 API Key 已配置'}
+                      {ssoAuth?.hasVipScope
+                        ? `✓ 已通过统一账号 [${ssoAuth.username}] 激活云端同步与 VIP 通道`
+                        : isVipUnlocked
+                        ? '✓ 管理员口令已验证，云端收藏夹同步与 VIP 通道已开启'
+                        : '✓ 自定义 API Key 已配置'}
                     </span>
                   </div>
 
