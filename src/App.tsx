@@ -1,9 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Heart } from 'lucide-react';
 import { CURATED_WALLPAPERS } from './data/wallpapers';
-import { HeaderNav } from './components/HeaderNav';
-import { ClockWidget } from './components/ClockWidget';
-import { PlayerControls } from './components/PlayerControls';
+import { ZenHudControls } from './components/ZenHudControls';
 import { FilmstripScrubber } from './components/FilmstripScrubber';
 import { GalleryView } from './components/GalleryView';
 import { CategorySettingsModal } from './components/CategorySettingsModal';
@@ -37,6 +35,7 @@ const DEFAULT_FILTER_CONFIG: PlayerFilterConfig = {
   enableYande: true,
   enableKonachan: true,
   qualityMode: 'auto',
+  intervalSeconds: 20,
 };
 
 function loadSavedConfig(): PlayerFilterConfig {
@@ -204,12 +203,12 @@ export function App() {
   const [currentSound, setCurrentSound] = useState<SoundType>('off');
   const [volume, setVolume] = useState(0.5);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [showFilmstrip, setShowFilmstrip] = useState(true);
   const [uiVisible, setUiVisible] = useState(true);
   const uiVisibleRef = useRef(uiVisible);
   useEffect(() => {
     uiVisibleRef.current = uiVisible;
   }, [uiVisible]);
+  const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [isFetchingPool, setIsFetchingPool] = useState(false);
   const [isCurrentImageLoaded, setIsCurrentImageLoaded] = useState(false);
@@ -550,7 +549,9 @@ export function App() {
     [wallpaperPool.length, detectedWidth]
   );
 
-  // Smart Auto-Play Timer: Only starts counting 22s AFTER the current image has rendered
+  const intervalSeconds = filterConfig.intervalSeconds || 20;
+
+  // Smart Auto-Play Timer: Starts counting intervalSeconds AFTER the current image has rendered
   useEffect(() => {
     if (autoPlayTimerRef.current) clearTimeout(autoPlayTimerRef.current);
 
@@ -560,46 +561,63 @@ export function App() {
 
     autoPlayTimerRef.current = setTimeout(() => {
       handleNext();
-    }, 22000);
+    }, intervalSeconds * 1000);
 
     return () => {
       if (autoPlayTimerRef.current) clearTimeout(autoPlayTimerRef.current);
     };
-  }, [autoPlay, activeTab, isCategoryModalOpen, isCurrentImageLoaded, handleNext]);
+  }, [autoPlay, intervalSeconds, activeTab, isCategoryModalOpen, isCurrentImageLoaded, handleNext]);
 
-  // Mouse idle detection to hide UI controls in player mode
+  // Mouse idle detection: fade out HUD after 3 seconds of inactivity
   const resetIdleTimer = useCallback(() => {
     setUiVisible(true);
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
 
-    if (activeTab === 'player' && !isCategoryModalOpen) {
+    if (activeTab === 'player' && !isCategoryModalOpen && !isPopoverOpen) {
       hideTimerRef.current = setTimeout(() => {
         setUiVisible(false);
-      }, 3500);
+      }, 3000);
     }
-  }, [activeTab, isCategoryModalOpen]);
+  }, [activeTab, isCategoryModalOpen, isPopoverOpen]);
 
   // Only extends idle timer if UI is already visible; keeps navigation quiet when UI is hidden
   const extendIdleTimerIfVisible = useCallback(() => {
     if (!uiVisibleRef.current) return;
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
 
-    if (activeTab === 'player' && !isCategoryModalOpen) {
+    if (activeTab === 'player' && !isCategoryModalOpen && !isPopoverOpen) {
       hideTimerRef.current = setTimeout(() => {
         setUiVisible(false);
-      }, 3500);
+      }, 3000);
     }
-  }, [activeTab, isCategoryModalOpen]);
+  }, [activeTab, isCategoryModalOpen, isPopoverOpen]);
 
-  // Toggle Zen Mode (pure wallpaper view vs normal UI)
+  // Toggle Zen HUD visibility
   const handleToggleUi = useCallback(() => {
     if (uiVisibleRef.current) {
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+      setIsPopoverOpen(false);
       setUiVisible(false);
     } else {
       resetIdleTimer();
     }
   }, [resetIdleTimer]);
+
+  // Exit Ambient Zen Mode back to BinOS Workstation
+  const handleExitZen = useCallback(() => {
+    setIsPopoverOpen(false);
+    if (document.fullscreenElement && document.exitFullscreen) {
+      document.exitFullscreen().catch(() => {});
+    }
+    if (window.parent && window.parent !== window) {
+      try {
+        window.parent.postMessage({ type: 'B0_AMBIENT_EXIT' }, '*');
+        return;
+      } catch {}
+    }
+    const homeUrl = /(^|\.)bin0sky\.tech$/i.test(window.location.hostname) ? 'https://bin0sky.tech/' : '/';
+    window.location.href = homeUrl;
+  }, []);
 
   useEffect(() => {
     const handleMouseMove = () => resetIdleTimer();
@@ -806,16 +824,25 @@ export function App() {
     return () => document.removeEventListener('fullscreenchange', handleFsChange);
   }, []);
 
-  // Keyboard shortcut listener (Aligned with Native App: Space = Favorite, P = Play/Pause, G = Gallery)
+  // Keyboard shortcut listener (Zen Mode: ←/→ Switch, Space Play/Pause, F Fullscreen, Esc Exit)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
         return;
       }
 
+      if ((e.metaKey || e.ctrlKey) && e.code === 'KeyJ') {
+        e.preventDefault();
+        handleExitZen();
+        return;
+      }
+
       if (e.code === 'Space') {
         e.preventDefault();
-        handleToggleFavorite();
+        setAutoPlay((prev) => {
+          showToast(!prev ? '▶ 继续自动轮播' : '⏸ 已暂停轮播');
+          return !prev;
+        });
         extendIdleTimerIfVisible();
       } else if (e.code === 'KeyP') {
         e.preventDefault();
@@ -824,8 +851,13 @@ export function App() {
           return !prev;
         });
         extendIdleTimerIfVisible();
+      } else if (e.code === 'KeyL') {
+        e.preventDefault();
+        handleToggleFavorite();
+        extendIdleTimerIfVisible();
       } else if (e.code === 'KeyG') {
         e.preventDefault();
+        setIsPopoverOpen(false);
         setActiveTab((prev) => (prev === 'player' ? 'gallery' : 'player'));
         setUiVisible(true);
       } else if (e.code === 'ArrowRight') {
@@ -859,10 +891,15 @@ export function App() {
         fetchCloudWallpapers(filterConfig, false);
         extendIdleTimerIfVisible();
       } else if (e.code === 'Escape') {
+        e.preventDefault();
         if (isCategoryModalOpen) {
           setIsCategoryModalOpen(false);
+        } else if (isPopoverOpen) {
+          setIsPopoverOpen(false);
         } else if (activeTab === 'gallery') {
           setActiveTab('player');
+        } else {
+          handleExitZen();
         }
       }
     };
@@ -875,8 +912,10 @@ export function App() {
     handlePrev,
     extendIdleTimerIfVisible,
     handleToggleUi,
+    handleExitZen,
     activeTab,
     isCategoryModalOpen,
+    isPopoverOpen,
     fetchCloudWallpapers,
     filterConfig,
     toggleScaleMode,
@@ -911,33 +950,16 @@ export function App() {
     <div
       className={`relative w-screen h-screen overflow-hidden select-none transition-colors duration-300 ${
         isDark ? 'bg-slate-950 text-slate-100' : 'bg-[#f5f5f7] text-[#1d1d1f]'
-      }`}
+      } ${!uiVisible && activeTab === 'player' && !isPopoverOpen && !isCategoryModalOpen ? 'cursor-none' : ''}`}
     >
       {/* Top Toast Capsule */}
       {toastMsg && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[60] px-4 py-2 rounded-full bg-black/75 backdrop-blur-xl border border-white/15 text-xs font-semibold text-white shadow-2xl pointer-events-none animate-in fade-in zoom-in-95 duration-200">
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[60] px-4 py-2 rounded-full bg-black/75 backdrop-blur-xl border border-white/15 text-xs font-semibold text-white shadow-2xl pointer-events-none animate-in fade-in zoom-in-95 duration-200">
           {toastMsg}
         </div>
       )}
 
-      {/* Top Header Navigation */}
-      <HeaderNav
-        activeTab={activeTab}
-        onTabChange={(tab) => {
-          setActiveTab(tab);
-          setUiVisible(true);
-        }}
-        favoritesCount={favorites.length}
-        isAdminUnlocked={isCloudSyncEnabled}
-        onOpenSettings={() => {
-          setIsCategoryModalOpen(true);
-          setUiVisible(true);
-        }}
-        uiVisible={activeTab === 'gallery' || uiVisible || isCategoryModalOpen}
-        lang={lang}
-      />
-
-      {/* MODE 1: FULLSCREEN 4K AMBIENT PLAYER */}
+      {/* MODE 1: BORDERLESS FULLSCREEN 4K ZEN PLAYER */}
       <div
         className={`absolute inset-0 transition-opacity duration-700 ease-in-out ${
           activeTab === 'player' ? 'opacity-100 pointer-events-auto z-10' : 'opacity-0 pointer-events-none z-0'
@@ -946,6 +968,10 @@ export function App() {
           handleToggleFavorite(currentWallpaper, { x: e.clientX, y: e.clientY });
         }}
         onClick={(e) => {
+          if (isPopoverOpen) {
+            setIsPopoverOpen(false);
+            return;
+          }
           const target = e.target as HTMLElement;
           if (
             target === e.currentTarget ||
@@ -980,11 +1006,57 @@ export function App() {
           </div>
         )}
 
-        {/* Ambient Clock and Date Widget */}
-        <ClockWidget currentWallpaper={currentWallpaper} visible={uiVisible} />
+        {/* Top-Right Minimal HUD: [ ••• ] Popover & [ × ] Close */}
+        <ZenHudControls
+          uiVisible={uiVisible}
+          isPopoverOpen={isPopoverOpen}
+          onTogglePopover={(open) => {
+            setIsPopoverOpen((prev) => (typeof open === 'boolean' ? open : !prev));
+            setUiVisible(true);
+          }}
+          onExitZen={handleExitZen}
+          filterConfig={filterConfig}
+          onSelectCategory={(cat) => {
+            handleUpdateConfig({ ...filterConfig, category: cat }, true);
+          }}
+          onOpenCategoryModal={() => {
+            setIsCategoryModalOpen(true);
+            setUiVisible(true);
+          }}
+          onOpenGallery={() => {
+            setActiveTab('gallery');
+            setUiVisible(true);
+          }}
+          onRefreshPool={() => fetchCloudWallpapers(filterConfig, false)}
+          isFetchingPool={isFetchingPool}
+          autoPlay={autoPlay}
+          onToggleAutoPlay={() => {
+            setAutoPlay((prev) => {
+              showToast(!prev ? '▶ 继续自动轮播' : '⏸ 已暂停轮播');
+              return !prev;
+            });
+          }}
+          intervalSeconds={intervalSeconds}
+          onChangeInterval={(sec) => {
+            handleUpdateConfig({ ...filterConfig, intervalSeconds: sec }, false);
+            showToast(`⏱ 轮播间隔已设为 ${sec} 秒`);
+          }}
+          currentSound={currentSound}
+          onSoundChange={handleSoundChange}
+          volume={volume}
+          onVolumeChange={handleVolumeChange}
+          scaleMode={scaleMode}
+          onToggleScaleMode={toggleScaleMode}
+          isCurrentFavorited={isCurrentFavorited}
+          onToggleFavorite={() => handleToggleFavorite(currentWallpaper)}
+          onSaveCurrentImage={() => handleSaveWallpaper(currentWallpaper)}
+          isFullscreen={isFullscreen}
+          onToggleFullscreen={toggleFullscreen}
+          lang={lang}
+        />
 
-        {/* Bottom Filmstrip Scrubber (Above Player Controls) */}
-        <div className="fixed bottom-20 left-0 right-0 z-40 pointer-events-none">
+        {/* Bottom Centered Frosted-Glass Filmstrip */}
+        <div className="fixed bottom-6 left-0 right-0 z-40 pointer-events-none">
           <FilmstripScrubber
             items={wallpaperPool}
             currentIndex={currentIndex}
@@ -994,44 +1066,9 @@ export function App() {
               setCurrentIndex(idx);
               extendIdleTimerIfVisible();
             }}
-            visible={(uiVisible || isCategoryModalOpen) && showFilmstrip}
+            visible={uiVisible || isPopoverOpen || isCategoryModalOpen}
           />
         </div>
-
-        {/* Floating Player Controls Bar */}
-        <PlayerControls
-          onPrev={handlePrev}
-          onNext={handleNext}
-          autoPlay={autoPlay}
-          onToggleAutoPlay={() => setAutoPlay(!autoPlay)}
-          isCurrentFavorited={isCurrentFavorited}
-          onToggleFavorite={() => handleToggleFavorite(currentWallpaper)}
-          showFilmstrip={showFilmstrip}
-          onToggleFilmstrip={() => setShowFilmstrip((prev) => !prev)}
-          currentSound={currentSound}
-          onSoundChange={handleSoundChange}
-          volume={volume}
-          onVolumeChange={handleVolumeChange}
-          isFullscreen={isFullscreen}
-          onToggleFullscreen={toggleFullscreen}
-          onOpenGallery={() => {
-            setActiveTab('gallery');
-            setUiVisible(true);
-          }}
-          filterConfig={filterConfig}
-          onOpenCategoryModal={() => {
-            setIsCategoryModalOpen(true);
-            setUiVisible(true);
-          }}
-          onRefreshPool={() => fetchCloudWallpapers(filterConfig, false)}
-          isFetchingPool={isFetchingPool}
-          scaleMode={scaleMode}
-          onToggleScaleMode={toggleScaleMode}
-          onSaveCurrentImage={() => handleSaveWallpaper(currentWallpaper)}
-          onToggleZenMode={handleToggleUi}
-          uiVisible={uiVisible || isCategoryModalOpen}
-          lang={lang}
-        />
       </div>
 
       {/* Category & Admin Cloud Sync Settings Modal */}

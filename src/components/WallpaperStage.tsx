@@ -189,8 +189,8 @@ export const WallpaperStage: React.FC<WallpaperStageProps> = ({
           } ${!layer.isFullRes ? 'scale-[1.005] blur-[1px]' : 'scale-100 blur-0'}`}
         />
 
-        {/* Subtle Vignette for Clock & UI Readability */}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/10 to-black/50 pointer-events-none" />
+        {/* Subtle Vignette for HUD Readability */}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/45 via-transparent to-black/20 pointer-events-none" />
       </div>
     );
   };
@@ -201,7 +201,7 @@ export const WallpaperStage: React.FC<WallpaperStageProps> = ({
       {renderLayerContent(activeLayer, true)}
 
       {isLoadingFullRes && uiVisible && (
-        <div className="fixed top-16 right-6 z-30 pointer-events-none flex items-center gap-2 px-3 py-1 rounded-full bg-black/40 backdrop-blur-md border border-white/10 text-[11px] text-indigo-200 animate-pulse">
+        <div className="fixed top-5 left-5 z-30 pointer-events-none flex items-center gap-2 px-3 py-1 rounded-full bg-black/40 backdrop-blur-md border border-white/10 text-[11px] text-indigo-200 animate-pulse">
           <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-ping" />
           <span>高清流优化中...</span>
         </div>
